@@ -5,7 +5,7 @@ import shutil
 from typing import Optional, Dict, Any
 import validators
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Message, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import yt_dlp
 
@@ -16,12 +16,21 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+
 # Load environment variables
 load_dotenv()
 
 # Bot configuration
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', 500000000))  # Default: 500MB
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', 50*1024*1024))  # Default to 50MB
+DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
+
+if DEBUG_MODE:
+    logging.getLogger("httpx").setLevel(logging.DEBUG)
+    logger.setLevel(logging.DEBUG)
+else:
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logger.setLevel(logging.INFO)
 
 # Supported platforms
 SUPPORTED_PLATFORMS = ['youtube', 'instagram', 'twitter', 'x.com']
@@ -46,17 +55,22 @@ def extract_video_info(url: str) -> Dict[str, Any]:
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        print(f"Video information extracting: {url}")
+        logger.info(f"Video information extracting: {url}")
         info = ydl.extract_info(url, download=False)
         return info
 
-def download_video(url: str, output_path: str) -> Optional[str]:
+def download_video(url: str, output_path: str, status_message: Message) -> Optional[str]:
     """Download video using yt-dlp."""
-    verbose = False
+    verbose = DEBUG_MODE
     format_selection = 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio/best/bestvideo+bestaudio'
-    def on_progress(d):
-        if d['status'] == 'finished':
-            print(f"Done downloading video: {d['filename']}")
+    async def on_progress(d):
+        return
+        # if d['status'] == 'finished':
+        #     status_message.edit_text("Download completed. Processing video...")
+        # elif d['status'] == 'downloading':
+        #     status_message.edit_text(f"Downloading video: {d['filename']} - {d['_percent_str']} at {d['_speed_str']}")
+        # elif d['status'] == 'error':
+        #     status_message.edit_text(f"Error downloading video: {d['filename']} - {d['error']}")
     try:
         ydl_opts = {
             'quiet': not verbose,
@@ -76,13 +90,13 @@ def download_video(url: str, output_path: str) -> Optional[str]:
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            print(f"Starting download to: {output_path}")
+            logger.info(f"Starting download to: {output_path}")
             ydl.download([url])
-            print(f"Download completed. Checking file: {output_path}")
+            logger.info(f"Download completed. Checking file: {output_path}")
             if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
                 return output_path  # Return the path to the downloaded file
             else:
-                print(f"Warning: Downloaded file is empty or does not exist")
+                logger.warning("Downloaded file is empty or does not exist")
                 return None
     except Exception as e:
         logger.error(f"Error downloading video: {e}")
@@ -140,17 +154,16 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         # Create temporary directory for download
         temp_dir = tempfile.mkdtemp()
         temp_path = os.path.join(temp_dir, "downloaded_video.mp4")
-        print(f"Temporary directory created: {temp_dir}")
-        print(f"Will download to: {temp_path}")
+        logger.info(f"Temporary directory created: {temp_dir}. Will download to: {temp_path}")
 
         # Download video
-        output_path = download_video(url, temp_path)
+        output_path = download_video(url, temp_path, status_message)
 
         if not output_path or not os.path.exists(output_path):
             await status_message.edit_text("Sorry, there was an error downloading the video.")
             return
         
-        print(f"Video downloaded to: {output_path}")
+        logger.info(f"Video downloaded to: {output_path}")
 
         # Check if file exists and size is within limits
         if os.path.getsize(output_path) > MAX_FILE_SIZE:
@@ -210,7 +223,11 @@ def main() -> None:
 
     # Start the Bot
     logger.info("Bot started. Press Ctrl+C to stop.")
+    logger.info(f"Debug mode: {DEBUG_MODE}")
+    if DEBUG_MODE:
+        logger.info("Debug mode is enabled. Verbose logging will be used.")
 
+    logger.info("Max file size for downloads: %d MB", MAX_FILE_SIZE // (1024 * 1024))
     # Run the bot until the user presses Ctrl-C
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
