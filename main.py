@@ -1,13 +1,13 @@
 import os
 import logging
 import tempfile
+import shutil
 from typing import Optional, Dict, Any
 import validators
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import yt_dlp
-from test.re_tests import u
 
 # Setup logging
 logging.basicConfig(
@@ -53,7 +53,7 @@ def extract_video_info(url: str) -> Dict[str, Any]:
 def download_video(url: str, output_path: str) -> Optional[str]:
     """Download video using yt-dlp."""
     verbose = False
-    format_selection = 'best/bestvideo+bestaudio/mp4/webm'
+    format_selection = 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio/best/bestvideo+bestaudio'
     def on_progress(d):
         if d['status'] == 'finished':
             print(f"Done downloading video: {d['filename']}")
@@ -66,18 +66,24 @@ def download_video(url: str, output_path: str) -> Optional[str]:
             'age_limit': 21,
             'geo_bypass': True,
             'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
-            'outtmpl': 'test_download.mp4',
+            'outtmpl': output_path,
             'merge_output_format': 'mp4',
             'progress_hooks': [on_progress],
             'postprocessors': [{
                 'key': 'FFmpegVideoConvertor',
                 'preferedformat': 'mp4',
-            }]  # Only use post-processors for automatic format
+            }]  # Ensure output is in mp4 format
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            print(f"Starting download to: {output_path}")
             ydl.download([url])
-            return 'test_download.mp4'  # Return the path to the downloaded file
+            print(f"Download completed. Checking file: {output_path}")
+            if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
+                return output_path  # Return the path to the downloaded file
+            else:
+                print(f"Warning: Downloaded file is empty or does not exist")
+                return None
     except Exception as e:
         logger.error(f"Error downloading video: {e}")
         return None
@@ -131,10 +137,11 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
             return
 
-        # Create temporary file for download
-        with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_file:
-            temp_path = temp_file.name
-        print(f"Temporary file created: {temp_path}")
+        # Create temporary directory for download
+        temp_dir = tempfile.mkdtemp()
+        temp_path = os.path.join(temp_dir, "downloaded_video.mp4")
+        print(f"Temporary directory created: {temp_dir}")
+        print(f"Will download to: {temp_path}")
 
         # Download video
         output_path = download_video(url, temp_path)
@@ -169,11 +176,21 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         # Cleanup
         os.unlink(output_path)
+        shutil.rmtree(temp_dir)  # Remove the temporary directory and all contents
         await status_message.delete()
 
     except Exception as e:
         logger.error(f"Error: {e}")
         await status_message.edit_text(f"An error occurred: {str(e)}")
+        
+        # Cleanup in case of error
+        try:
+            if 'output_path' in locals() and output_path and os.path.exists(output_path):
+                os.unlink(output_path)
+            if 'temp_dir' in locals() and temp_dir and os.path.exists(temp_dir):
+                shutil.rmtree(temp_dir)
+        except Exception as cleanup_error:
+            logger.error(f"Error during cleanup after exception: {cleanup_error}")
 
 def main() -> None:
     """Start the bot."""
