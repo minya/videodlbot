@@ -52,19 +52,32 @@ def extract_video_info(url: str) -> Dict[str, Any]:
 
 def download_video(url: str, output_path: str) -> Optional[str]:
     """Download video using yt-dlp."""
+    verbose = False
+    format_selection = 'best/bestvideo+bestaudio/mp4/webm'
+    def on_progress(d):
+        if d['status'] == 'finished':
+            print(f"Done downloading video: {d['filename']}")
     try:
         ydl_opts = {
-            #'format': 'best[filesize<50M]/best',  # Prefer videos smaller than 50MB
-            'outtmpl': {
-                'default': output_path,
-            },
-            'quiet': True,
-            'no_warnings': True,
+            'quiet': not verbose,
+            'no_warnings': not verbose,
+            'verbose': verbose,
+            'format': format_selection,
+            'age_limit': 21,
+            'geo_bypass': True,
+            'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
+            'outtmpl': 'test_download.mp4',
+            'merge_output_format': 'mp4',
+            'progress_hooks': [on_progress],
+            'postprocessors': [{
+                'key': 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4',
+            }]  # Only use post-processors for automatic format
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-            return output_path
+            return 'test_download.mp4'  # Return the path to the downloaded file
     except Exception as e:
         logger.error(f"Error downloading video: {e}")
         return None
