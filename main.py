@@ -2,12 +2,16 @@ import os
 import logging
 import tempfile
 import shutil
+import time
+import threading
 from typing import Optional, Dict, Any
 import validators
 from dotenv import load_dotenv
 from telegram import Message, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+import asyncio
 import yt_dlp
+from concurrent.futures import ThreadPoolExecutor
 
 # Setup logging
 logging.basicConfig(
@@ -59,18 +63,24 @@ def extract_video_info(url: str) -> Dict[str, Any]:
         info = ydl.extract_info(url, download=False)
         return info
 
-def download_video(url: str, output_path: str, status_message: Message) -> Optional[str]:
-    """Download video using yt-dlp."""
+def download_video(url: str, output_path: str, progress_data: dict) -> Optional[str]:
+    """Download video using yt-dlp (synchronous function)."""
     verbose = DEBUG_MODE
     format_selection = 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio/best/bestvideo+bestaudio'
-    async def on_progress(d):
-        return
-        # if d['status'] == 'finished':
-        #     status_message.edit_text("Download completed. Processing video...")
-        # elif d['status'] == 'downloading':
-        #     status_message.edit_text(f"Downloading video: {d['filename']} - {d['_percent_str']} at {d['_speed_str']}")
-        # elif d['status'] == 'error':
-        #     status_message.edit_text(f"Error downloading video: {d['filename']} - {d['error']}")
+    
+    # This progress hook captures download info in the shared progress_data dictionary
+    def on_progress(d):
+        # Update the shared progress data with a copy of the dictionary to avoid reference issues
+        progress_data.clear()
+        progress_data.update(d.copy())
+        
+        if d['status'] == 'finished':
+            logger.info(f"Done downloading video: {d.get('filename', 'unknown')}")
+        elif d['status'] == 'downloading':
+            logger.info(f"Downloading: {d.get('_percent_str', 'N/A')} at {d.get('_speed_str', 'N/A')}")
+        elif d['status'] == 'error':
+            logger.error(f"Error downloading: {d.get('error', 'Unknown error')}")
+    
     try:
         ydl_opts = {
             'quiet': not verbose,
@@ -156,13 +166,82 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         temp_path = os.path.join(temp_dir, "downloaded_video.mp4")
         logger.info(f"Temporary directory created: {temp_dir}. Will download to: {temp_path}")
 
-        # Download video
-        output_path = download_video(url, temp_path, status_message)
-
+        # Create a thread to download the video
+        download_complete = threading.Event()
+        download_result = [None]  # Use a list to store the result from the thread
+        download_error = [None]   # Use a list to store any exception from the thread
+        progress_data = {}        # Shared dictionary to store progress information
+        
+        def download_thread():
+            try:
+                result = download_video(url, temp_path, progress_data)
+                download_result[0] = result
+            except Exception as e:
+                logger.error(f"Error in download thread: {e}")
+                download_error[0] = e
+            finally:
+                download_complete.set()
+        
+        # Start the download in a separate thread
+        thread = threading.Thread(target=download_thread)
+        thread.daemon = True  # Make thread daemon so it doesn't block program exit
+        thread.start()
+        
+        # Update status message periodically while downloading
+        try:
+            last_update_time = 0
+            while not download_complete.is_set():
+                # Avoid updating the message too frequently (rate limiting)
+                current_time = time.time()
+                if current_time - last_update_time >= 1.5:  # Update every 1.5 seconds
+                    last_update_time = current_time
+                    
+                    # Get progress info from the shared dictionary
+                    status = progress_data.get('status', '')
+                    
+                    if not progress_data:
+                        # No progress data yet, check if file exists and show size
+                        if os.path.exists(temp_path):
+                            file_size = os.path.getsize(temp_path) / (1024 * 1024)  # Size in MB
+                            await status_message.edit_text(f"Downloading... {file_size:.2f} MB downloaded")
+                    elif status == 'downloading':
+                        logger.debug(f"Progress data: {progress_data}")
+                        percent = progress_data.get('_percent_str', 'N/A')
+                        speed = progress_data.get('_speed_str', 'N/A')
+                        eta = progress_data.get('_eta_str', '')
+                        filename = progress_data.get('filename', 'video')
+                        
+                        message = f"Downloading {os.path.basename(filename)}...\n"
+                        message += f"Progress: {percent} at {speed}\n"
+                        if eta:
+                            message += f"ETA: {eta}"
+                        
+                        await status_message.edit_text(message)
+                    elif status == 'finished':
+                        await status_message.edit_text("Download complete. Processing video...")
+                    
+                await asyncio.sleep(0.5)
+        except asyncio.CancelledError:
+            logger.warning("Download status updates were cancelled")
+            raise
+        except Exception as e:
+            logger.error(f"Error while updating status: {e}")
+        
+        # Wait for thread to complete if it hasn't already
+        if thread.is_alive():
+            thread.join(timeout=5)  # Wait up to 5 seconds for thread to finish
+            
+        # Check if there was an error in the download thread
+        if download_error[0]:
+            raise download_error[0]
+            
+        # Get the result from the thread
+        output_path = download_result[0]
+        
         if not output_path or not os.path.exists(output_path):
             await status_message.edit_text("Sorry, there was an error downloading the video.")
             return
-        
+
         logger.info(f"Video downloaded to: {output_path}")
 
         # Check if file exists and size is within limits
@@ -195,9 +274,15 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     except Exception as e:
         logger.error(f"Error: {e}")
         await status_message.edit_text(f"An error occurred: {str(e)}")
-        
+
         # Cleanup in case of error
         try:
+            # Cancel any running thread if it's still active
+            if 'thread' in locals() and thread.is_alive():
+                logger.info("Waiting for download thread to finish...")
+                thread.join(timeout=2)  # Give it a short time to finish
+                
+            # Clean up files
             if 'output_path' in locals() and output_path and os.path.exists(output_path):
                 os.unlink(output_path)
             if 'temp_dir' in locals() and temp_dir and os.path.exists(temp_dir):
