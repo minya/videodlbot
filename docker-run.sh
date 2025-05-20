@@ -63,6 +63,12 @@ check_env_file() {
         echo "Please edit the .env file and add your actual Telegram Bot Token."
         exit 1
     fi
+    
+    if grep -q "your_telegram_user_id_here" .env; then
+        echo -e "${RED}Error: Default Telegram User ID detected in .env file.${NC}"
+        echo "Please edit the .env file and add your actual Telegram User ID."
+        exit 1
+    fi
 }
 
 # Function to build Docker image

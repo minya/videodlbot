@@ -7,6 +7,7 @@ A Telegram bot that can download videos from YouTube, Instagram, and Twitter/X u
 - Downloads videos from YouTube, Instagram, and Twitter/X
 - Automatically handles different video formats
 - Respects Telegram's file size limitations
+- User access control with allowlist
 - Easy to set up and deploy
 - Can be run as a Docker container
 
@@ -32,15 +33,22 @@ A Telegram bot that can download videos from YouTube, Instagram, and Twitter/X u
 3. Set up your environment variables by editing the `.env` file:
    ```
    TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
+   ALLOWED_USERS=your_telegram_user_id_here  # Comma-separated list of allowed user IDs
    MAX_FILE_SIZE=50000000  # Optional: Max file size in bytes (default: 50MB)
    ```
 
-## How to Obtain a Telegram Bot Token
+## How to Obtain a Telegram Bot Token and User ID
 
 1. Open Telegram and search for [@BotFather](https://t.me/botfather)
 2. Start a chat with BotFather and use the `/newbot` command
 3. Follow the instructions to create a new bot
 4. Once created, BotFather will provide you with a token - copy this into your `.env` file
+
+To find your Telegram User ID:
+1. Start a chat with [@userinfobot](https://t.me/userinfobot)
+2. The bot will reply with your user ID
+3. Copy this ID into the `ALLOWED_USERS` field in your `.env` file
+4. For multiple users, separate IDs with commas (e.g., `123456789,987654321`)
 
 ## Running the Bot
 
@@ -57,6 +65,8 @@ The bot will run until you terminate the process (Ctrl+C).
 2. Send a URL from YouTube, Instagram, or Twitter/X
 3. The bot will download the video and send it back to you
 
+Note: Only users whose Telegram IDs are listed in the `ALLOWED_USERS` setting will be able to use the bot. This helps prevent unauthorized usage.
+
 ## Commands
 
 - `/start` - Introduces the bot and explains its functionality
@@ -66,6 +76,7 @@ The bot will run until you terminate the process (Ctrl+C).
 
 - Due to Telegram API limitations, videos larger than 50MB cannot be sent
 - Some websites may implement anti-scraping measures that could prevent downloads
+- Access is restricted to users specified in the `ALLOWED_USERS` setting for security
 
 ## Deployment
 
@@ -89,7 +100,7 @@ The easiest way to run the bot in Docker is with the included helper script:
    cp .env.docker.sample .env
    ```
 
-3. Edit the `.env` file to add your Telegram Bot Token and adjust any other settings.
+3. Edit the `.env` file to add your Telegram Bot Token, your Telegram User ID in the `ALLOWED_USERS` setting, and adjust any other settings.
 
 4. Run the bot:
    ```
@@ -120,7 +131,7 @@ If you prefer to use Docker Compose commands directly:
    cp .env.docker.sample .env
    ```
 
-2. Edit the `.env` file to add your Telegram Bot Token.
+2. Edit the `.env` file to add your Telegram Bot Token and User ID.
 
 3. Build and start the container:
    ```
@@ -150,6 +161,7 @@ If you prefer to use Docker without docker-compose:
    ```
    docker run -d --name videodlbot \
      -e TELEGRAM_BOT_TOKEN=your_token_here \
+     -e ALLOWED_USERS=your_user_id_here \
      -e MAX_FILE_SIZE=1073741824 \
      -e DEBUG_MODE=false \
      -v $(pwd)/downloads:/app/downloads \

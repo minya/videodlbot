@@ -28,6 +28,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', 50*1024*1024))  # Default to 50MB
 DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
+ALLOWED_USERS = os.getenv('ALLOWED_USERS', '').split(',')
 
 if DEBUG_MODE:
     logging.getLogger("httpx").setLevel(logging.DEBUG)
@@ -131,6 +132,12 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    if str(user.id) not in ALLOWED_USERS:
+        await update.message.reply_text("You are not authorized to use this bot.")
+        logger.warning(f"Unauthorized access attempt by user: {user.id}")
+        return
+
     """Process the URL and download the video."""
     url = update.message.text.strip()
 
