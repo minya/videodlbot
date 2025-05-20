@@ -8,6 +8,7 @@ A Telegram bot that can download videos from YouTube, Instagram, and Twitter/X u
 - Automatically handles different video formats
 - Respects Telegram's file size limitations
 - Easy to set up and deploy
+- Can be run as a Docker container
 
 ## Prerequisites
 
@@ -69,6 +70,101 @@ The bot will run until you terminate the process (Ctrl+C).
 ## Deployment
 
 For 24/7 operation, consider deploying the bot on a cloud platform or a VPS.
+
+### Running with Docker
+
+You can easily run this bot as a Docker container. We provide both a Docker Compose setup and a convenience script for managing the Docker container.
+
+#### Using the Helper Script
+
+The easiest way to run the bot in Docker is with the included helper script:
+
+1. Make the script executable:
+   ```
+   chmod +x docker-run.sh
+   ```
+
+2. Copy the environment file:
+   ```
+   cp .env.docker.sample .env
+   ```
+
+3. Edit the `.env` file to add your Telegram Bot Token and adjust any other settings.
+
+4. Run the bot:
+   ```
+   ./docker-run.sh start
+   ```
+
+5. View logs:
+   ```
+   ./docker-run.sh logs
+   ```
+
+6. Stop the bot:
+   ```
+   ./docker-run.sh stop
+   ```
+
+7. Show all available commands:
+   ```
+   ./docker-run.sh help
+   ```
+
+#### Using Docker Compose Directly
+
+If you prefer to use Docker Compose commands directly:
+
+1. Copy the environment file:
+   ```
+   cp .env.docker.sample .env
+   ```
+
+2. Edit the `.env` file to add your Telegram Bot Token.
+
+3. Build and start the container:
+   ```
+   docker-compose up -d
+   ```
+
+4. Stop the container:
+   ```
+   docker-compose down
+   ```
+
+5. View logs:
+   ```
+   docker-compose logs -f
+   ```
+
+#### Manual Docker Setup
+
+If you prefer to use Docker without docker-compose:
+
+1. Build the Docker image:
+   ```
+   docker build -t videodlbot .
+   ```
+
+2. Run the container:
+   ```
+   docker run -d --name videodlbot \
+     -e TELEGRAM_BOT_TOKEN=your_token_here \
+     -e MAX_FILE_SIZE=1073741824 \
+     -e DEBUG_MODE=false \
+     -v $(pwd)/downloads:/app/downloads \
+     -v $(pwd)/cookies.txt:/app/cookies.txt:ro \
+     videodlbot
+   ```
+
+#### Docker Volume and Cookies
+
+The Docker setup uses a volume for downloads to persist downloaded files between container restarts. If you need to use cookies for authentication with certain sites:
+
+1. Create a `cookies.txt` file in the project directory.
+2. Set `USE_COOKIES=true` in your `.env` file.
+
+The cookies file will be mounted as read-only inside the container.
 
 ## Troubleshooting
 

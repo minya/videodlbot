@@ -1,0 +1,23 @@
+version: '3'
+
+services:
+  videodlbot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: videodlbot
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - MAX_FILE_SIZE=${MAX_FILE_SIZE:-1073741824}
+      - DEBUG_MODE=${DEBUG_MODE:-false}
+      - DOWNLOAD_TIMEOUT=${DOWNLOAD_TIMEOUT:-30}
+      - DOWNLOAD_RETRIES=${DOWNLOAD_RETRIES:-3}
+      - USE_COOKIES=${USE_COOKIES:-false}
+      - PREFERRED_FORMAT=${PREFERRED_FORMAT:-mp4}
+    networks:
+      - bot-network
+
+networks:
+  bot-network:
+    driver: bridge
