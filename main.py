@@ -75,9 +75,9 @@ def download_video(url: str, output_path: str, progress_data: dict) -> Optional[
         progress_data.update(d.copy())
         
         if d['status'] == 'finished':
-            logger.info(f"Done downloading video: {d.get('filename', 'unknown')}")
+            logger.info(f"Done downloading video: {d.get('filename', 'unknown')} {d.get('_total_bytes_str', 'N/A')}")
         elif d['status'] == 'downloading':
-            logger.info(f"Downloading: {d.get('_percent_str', 'N/A')} at {d.get('_speed_str', 'N/A')}")
+            logger.debug(f"Downloading: {d.get('_percent_str', 'N/A')} at {d.get('_speed_str', 'N/A')}")
         elif d['status'] == 'error':
             logger.error(f"Error downloading: {d.get('error', 'Unknown error')}")
     
