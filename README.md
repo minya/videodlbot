@@ -34,7 +34,7 @@ A Telegram bot that can download videos from YouTube, Instagram, and Twitter/X u
    ```
    TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here
    ALLOWED_USERS=your_telegram_user_id_here  # Comma-separated list of allowed user IDs
-   MAX_FILE_SIZE=50000000  # Optional: Max file size in bytes (default: 50MB)
+   MAX_FILE_SIZE=52428800  # Optional: Max file size in bytes (default: 50MB)
    ```
 
 ## How to Obtain a Telegram Bot Token and User ID

@@ -255,7 +255,7 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if os.path.getsize(output_path) > MAX_FILE_SIZE:
             await status_message.edit_text(
                 f"Sorry, the downloaded video is too large to send via Telegram "
-                f"(size: {os.path.getsize(output_path) // 1000000}MB, max: {MAX_FILE_SIZE // 1000000}MB)."
+                f"(size: {os.path.getsize(output_path) // 1048576}MB, max: {MAX_FILE_SIZE // 1048576}MB)."
             )
             os.unlink(output_path)
             return

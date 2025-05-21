@@ -22,7 +22,7 @@ RUN chmod +x /app/docker-entrypoint.sh
 
 # Environment variables can be specified at runtime
 ENV TELEGRAM_BOT_TOKEN=""
-ENV MAX_FILE_SIZE=1073741824
+ENV MAX_FILE_SIZE=52428800
 ENV DEBUG_MODE=false
 
 # Create volume for downloads and cookies

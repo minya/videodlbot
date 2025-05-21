@@ -28,7 +28,7 @@ if [ ! -f ".env" ]; then
     echo "TELEGRAM_BOT_TOKEN=your_telegram_bot_token_here" >> .env
     echo "" >> .env
     echo "# Optional Configuration" >> .env
-    echo "# MAX_FILE_SIZE=50000000  # Default: 50MB" >> .env
+    echo "# MAX_FILE_SIZE=52428800  # Default: 50MB" >> .env
     
     echo "Please edit the .env file to add your Telegram Bot Token."
     exit 1
