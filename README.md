@@ -5,7 +5,9 @@ A Telegram bot that can download videos from YouTube, Instagram, and Twitter/X u
 ## Features
 
 - Downloads videos from YouTube, Instagram, and Twitter/X
-- Automatically handles different video formats
+- Interactive format selection with clear categorized options
+- Supports video downloads in various resolutions
+- Offers audio-only options in multiple formats and qualities
 - Respects Telegram's file size limitations
 - User access control with allowlist
 - Easy to set up and deploy
@@ -62,15 +64,34 @@ The bot will run until you terminate the process (Ctrl+C).
 ## Using the Bot
 
 1. Start a chat with your bot on Telegram
-2. Send a URL from YouTube, Instagram, or Twitter/X
-3. The bot will download the video and send it back to you
+1. Send a URL from YouTube, Instagram, or Twitter/X
+2. The bot will show you all available formats as buttons
+3. Select your preferred format and the bot will download and send it to you
 
 Note: Only users whose Telegram IDs are listed in the `ALLOWED_USERS` setting will be able to use the bot. This helps prevent unauthorized usage.
+
+### Format Selection
+
+When you send a URL, the bot automatically extracts all available formats:
+
+#### Video Formats Section
+- Shows actual available resolutions with file size estimates (e.g., "1080p mp4 (24.5MB)")
+- Displays all quality options from highest to lowest
+- Formats are sorted by resolution for easy selection
+
+#### Audio Formats Section
+- Lists available audio-only formats (e.g., "MP3 192kbps (3.2MB)")
+- Shows exactly what the source offers without any conversion
+- Includes bitrate and file size information when available
+
+The bot displays the video title, duration, and source platform to help you confirm you're downloading the right content.
+
+If only one format is available, the bot will start downloading immediately without showing format options.
 
 ## Commands
 
 - `/start` - Introduces the bot and explains its functionality
-- `/help` - Shows usage instructions
+- `/help` - Shows detailed usage instructions and format selection help
 
 ## Limitations
 
