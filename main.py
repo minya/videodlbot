@@ -62,44 +62,25 @@ def extract_video_info(url: str) -> Dict[str, Any]:
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         logger.info(f"Full video information extracting (for formats): {url}")
+        # Add noplaylist to ensure only single video info is processed
+        ydl_opts['noplaylist'] = True
         info = ydl.extract_info(url, download=False)
         return info
-
-def check_if_playlist(url: str) -> bool:
-    """Quickly check if a URL is a playlist without fetching all video formats."""
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'extract_flat': True,  # Extract only basic info, suitable for playlists
-        'skip_download': True,
-        'playlistend': 1,      # Process only the first item of a playlist (if it is one)
-                               # to confirm structure without fetching everything.
-    }
-    try:
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            logger.debug(f"Lightweight playlist check for: {url}")
-            info = ydl.extract_info(url, download=False)
-            # If 'entries' key exists and is a list, it's a playlist.
-            # Also, _type: 'playlist' is a strong indicator.
-            if info and (info.get('_type') == 'playlist' or isinstance(info.get('entries'), list)):
-                logger.info(f"URL detected as playlist (lightweight check): {url}")
-                return True
-            logger.debug(f"URL not detected as playlist (lightweight check): {url}")
-            return False
-    except Exception as e:
-        # If yt-dlp errors out on a URL during this light check,
-        # it might be an invalid URL or something yt-dlp can't handle.
-        # Treat as "not a playlist" for this check, full extraction will handle errors.
-        logger.warning(f"Lightweight playlist check failed for {url}: {e}")
-        return False
 
 def download_video(url: str, output_path: str, progress_data: dict, format_id: str = None, is_audio_only: bool = False) -> Optional[str]:
     """Download video using yt-dlp (synchronous function)."""
     verbose = DEBUG_MODE
 
-    # Use specified format ID, or default to best available
-    format_selection = format_id if format_id else 'best'
-    
+    if is_audio_only:
+        # If a specific audio format ID is provided, use it.
+        # Otherwise, default to the best available audio.
+        format_selection = format_id if format_id else 'bestaudio/best'
+    else:
+        # For video, if a specific video format ID is provided (e.g., from user selection),
+        # combine it with the best available audio stream to ensure sound.
+        # Otherwise (e.g., direct download of 'best'), default to best video with best audio.
+        format_selection = f"{format_id}" if format_id else 'bestvideo+bestaudio/best'
+
     logger.info(f"Using format selection: {format_selection}, Audio only: {is_audio_only}")
 
     # This progress hook captures download info in the shared progress_data dictionary
@@ -127,6 +108,7 @@ def download_video(url: str, output_path: str, progress_data: dict, format_id: s
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
             'progress_hooks': [on_progress],
+            'noplaylist': True,  # Ensure only the specified video is downloaded
         }
         
         # Configure postprocessors based on format type
@@ -146,7 +128,7 @@ def download_video(url: str, output_path: str, progress_data: dict, format_id: s
             logger.info(f"Starting download to: {output_path}")
             ydl.download([url])
             logger.info(f"Download completed. Checking file: {output_path}")
-            
+
             # Check if file exists
             if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
                 return output_path  # Return the path to the downloaded file
@@ -161,7 +143,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
     # Clear any previous session data
     context.user_data.clear()
-    
+
     user = update.effective_user
     await update.message.reply_html(
         f"Hi {user.mention_html()}!\n\n"
@@ -190,10 +172,10 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text("You are not authorized to use this bot.")
         logger.warning(f"Unauthorized access attempt by user: {user.id}")
         return
-        
+
     # Clear any existing session data
     context.user_data.clear()
-    
+
     url = update.message.text.strip()
     # Store URL in user data first thing
     context.user_data['current_url'] = url
@@ -211,41 +193,43 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         return
 
-    status_message = await update.message.reply_text("Checking URL type, please wait...")
+    status_message = await update.message.reply_text("Fetching available formats, please wait...")
 
     try:
-        # Lightweight playlist check first
-        is_playlist = await asyncio.to_thread(check_if_playlist, url)
-        if is_playlist:
+        # Extract video information. extract_video_info now uses noplaylist=True
+        info = await asyncio.to_thread(extract_video_info, url)
+
+        if not info:
             await status_message.edit_text(
-                "It looks like this is a playlist URL. "
-                "Currently, I can only process individual video URLs.\n\n"
-                "Please send me the URL of a single video from the playlist."
+                "Sorry, couldn't extract information from this URL. "
+                "It might be a playlist or an unsupported link. Please try a direct link to a single video."
             )
             return
 
-        # If not a playlist, proceed with full format extraction
-        await status_message.edit_text("Fetching available formats, please wait...")
-        info = await asyncio.to_thread(extract_video_info, url)
-        
-        if not info:
-            await status_message.edit_text("Sorry, couldn't extract information from this URL.")
-            return
-            
-        # Fallback check, though the pre-check should catch most playlists.
-        # This handles cases where the lightweight check might miss a playlist structure
-        # or if a single video URL surprisingly returns playlist-like info.
-        if info.get('_type') == 'playlist' or ('entries' in info and isinstance(info.get('entries'), list) and len(info.get('entries', [])) > 1):
-            # Check for len(entries) > 1 because some single videos might have an 'entries' list with one item (themselves)
-            # when certain yt-dlp options are used, though less likely with our current extract_video_info.
-            logger.info(f"URL identified as playlist by fallback check: {url}")
+        # Check if yt-dlp, despite noplaylist=True, still identified the content as a playlist
+        # or if the URL was a generic playlist that couldn't be resolved to a single video.
+        # A single video (even from a playlist URL like youtube.com/watch?v=...&list=...)
+        # processed with noplaylist=True should not have _type='playlist'
+        # and typically wouldn't have an 'entries' list with multiple items.
+        # If 'entries' exists and has only 1 item, it's usually the video itself.
+
+        is_playlist_type = info.get('_type') == 'playlist'
+        # Some single videos might be returned as an 'entries' list with one item.
+        # We consider it a playlist if there are multiple entries.
+        has_multiple_entries = 'entries' in info and \
+                               isinstance(info.get('entries'), list) and \
+                               len(info.get('entries', [])) > 1
+
+        if is_playlist_type or has_multiple_entries:
+            logger.warning(f"URL resolved as playlist or multi-entry structure despite noplaylist=True: {url}. Info type: {info.get('_type')}")
             await status_message.edit_text(
-                "It looks like this is a playlist URL. "
-                "Currently, I can only process individual video URLs.\n\n"
-                "Please send me the URL of a single video from the playlist."
+                "It looks like this URL refers to a playlist or I couldn't isolate a single video from it. "
+                "I can only process individual video URLs.\n\n"
+                "If you're trying to download a specific video from a playlist, "
+                "please ensure the URL directly points to that video (e.g., includes 'v=VIDEO_ID' for YouTube)."
             )
             return
-            
+
         title = info.get('title', 'Unknown Video')
 
         # Store video info in context for later use
@@ -259,7 +243,7 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             context.user_data['is_audio_only'] = False
             await download_and_send_video(update, context, url, status_message)
             return
-            
+
         # If only one format is available, download it directly
         if len(info['formats']) == 1:
             await status_message.edit_text("Only one format available. Starting download...")
@@ -270,10 +254,10 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         # Get available formats
         formats = info.get('formats', [])
-        
+
         # Filter out formats without essential info
         formats = [f for f in formats if f.get('format_id')]
-        
+
         # Separate audio and video formats
         video_formats = [f for f in formats if f.get('vcodec') != 'none']
         audio_formats = [f for f in formats if f.get('acodec') != 'none' and f.get('vcodec') == 'none']
@@ -329,35 +313,35 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 selected_video_formats = selected_video_formats[:8]
             else:
                 selected_video_formats = unique_video_formats
-            
+
             # Create buttons for video formats (2 per row)
             row = []
             for fmt in selected_video_formats:
                 format_id = fmt.get('format_id', '')
                 height = get_height(fmt)
                 ext = fmt.get('ext', 'mp4')
-                
+
                 # Get filesize if available
                 filesize = fmt.get('filesize')
                 if not filesize and fmt.get('filesize_approx'):
                     filesize = fmt.get('filesize_approx')
                 filesize_str = f"{(filesize or 0) / (1024*1024):.1f}MB" if filesize else 'Unknown'
-                
+
                 # Format resolution display
                 resolution_str = f"{height}p" if height else fmt.get('resolution', 'Unknown')
-                
+
                 # Create button with format information
                 button_text = f"{resolution_str} {ext} ({filesize_str})"
                 row.append(InlineKeyboardButton(
                     button_text,
                     callback_data=f"f:{format_id}:0"  # 0 = not audio only
                 ))
-                
+
                 # Create rows with 2 buttons each
                 if len(row) == 2:
                     keyboard.append(row)
                     row = []
-            
+
             # Add any remaining buttons
             if row:
                 keyboard.append(row)
@@ -366,16 +350,16 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         if audio_formats:
             # Sort audio by quality (bitrate or filesize)
             audio_formats.sort(key=lambda x: (x.get('abr', 0) or 0, x.get('filesize', 0) or 0), reverse=True)
-            
+
             # Add header for audio formats
             keyboard.append([InlineKeyboardButton("🎵 Audio Only", callback_data="h")])
-            
+
             # Limit to max 4 audio formats
             selected_audio_formats = []
             seen_exts = set()
             # Try to find high quality audio in different formats
             audio_exts = set()
-        
+
             # Prioritize common audio formats (mp3, m4a, etc.)
             priority_exts = ['mp3', 'm4a', 'ogg', 'opus', 'aac', 'flac', 'wav']
             for ext in priority_exts:
@@ -386,41 +370,41 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                     # Take the highest quality one
                     selected_audio_formats.append(matching_formats[0])
                     seen_exts.add(ext)
-            
+
             # Add other unique formats until we have 4
             for fmt in audio_formats:
                 ext = fmt.get('ext', '')
                 if ext not in seen_exts and len(selected_audio_formats) < 4:
                     selected_audio_formats.append(fmt)
                     seen_exts.add(ext)
-            
+
             # Create buttons for audio formats (2 per row)
             row = []
             for fmt in selected_audio_formats:
                 format_id = fmt.get('format_id', '')
                 ext = fmt.get('ext', 'unknown')
                 abr = fmt.get('abr', 0)
-                
+
                 # Get quality info
                 quality_str = f"{int(abr)}kbps" if abr else ""
                 filesize = fmt.get('filesize', 0) or 0
                 filesize_str = f"{filesize / (1024*1024):.1f}MB" if filesize else 'Unknown'
-                
+
                 # Format button text
                 button_text = f"{ext.upper()} {quality_str}".strip()
                 if filesize_str != 'Unknown':
                     button_text += f" ({filesize_str})"
-                
+
                 row.append(InlineKeyboardButton(
                     button_text,
                     callback_data=f"f:{format_id}:1"  # 1 = audio only
                 ))
-                
+
                 # Create rows with 2 buttons each
                 if len(row) == 2:
                     keyboard.append(row)
                     row = []
-            
+
             # Add any remaining buttons
             if row:
                 keyboard.append(row)
@@ -474,14 +458,14 @@ async def handle_format_selection(update: Update, context: ContextTypes.DEFAULT_
 
     # Parse the callback data
     parts = data.split(":", 2)
-    
+
     # Handle header buttons (no action needed)
     if data.startswith("header_noop"):
         return
-        
+
     # Get URL from user data
     url = context.user_data.get('current_url')
-    
+
     # Handle cancellation
     if parts[0] == "c" or parts[0] == "cancel":
         await query.edit_message_text("Download canceled.")
@@ -530,12 +514,12 @@ async def download_and_send_video(update: Update, context: ContextTypes.DEFAULT_
     temp_dir = None
     output_path = None
     thread = None
-    
+
     try:
         if not url:
             await status_message.edit_text("Error: No URL provided. Please try again.")
             return
-            
+
         # Get video info from context if available, otherwise extract it
         info = context.user_data.get('video_info')
         if not info:
@@ -681,7 +665,7 @@ async def download_and_send_video(update: Update, context: ContextTypes.DEFAULT_
         caption += f"Source: {url}"
 
         media_type = "audio" if is_audio_only else "video"
-        
+
         with open(output_path, 'rb') as media_file:
             if is_audio_only:
                 # Send as audio
@@ -730,13 +714,13 @@ async def download_and_send_video(update: Update, context: ContextTypes.DEFAULT_
 
         # Send completion message
         success_message = f"✅ Download complete! Your {media_type} has been sent."
-        
+
         # Cleanup
         if output_path and os.path.exists(output_path):
             os.unlink(output_path)
         if temp_dir and os.path.exists(temp_dir):
             shutil.rmtree(temp_dir)  # Remove the temporary directory and all contents
-        
+
         try:
             await status_message.edit_text(success_message)
         except Exception:
@@ -767,7 +751,7 @@ def main() -> None:
         logger.error("No bot token provided. Please set TELEGRAM_BOT_TOKEN in .env file.")
         logger.error("Create a .env file with TELEGRAM_BOT_TOKEN=your_token_here")
         return
-    
+
     if not ALLOWED_USERS or all(not user.strip() for user in ALLOWED_USERS):
         logger.warning("No allowed users specified. Nobody will be able to use this bot.")
         logger.warning("Add user IDs to ALLOWED_USERS in .env file (comma-separated)")
