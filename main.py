@@ -61,9 +61,37 @@ def extract_video_info(url: str) -> Dict[str, Any]:
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        logger.info(f"Video information extracting: {url}")
+        logger.info(f"Full video information extracting (for formats): {url}")
         info = ydl.extract_info(url, download=False)
         return info
+
+def check_if_playlist(url: str) -> bool:
+    """Quickly check if a URL is a playlist without fetching all video formats."""
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'extract_flat': True,  # Extract only basic info, suitable for playlists
+        'skip_download': True,
+        'playlistend': 1,      # Process only the first item of a playlist (if it is one)
+                               # to confirm structure without fetching everything.
+    }
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            logger.debug(f"Lightweight playlist check for: {url}")
+            info = ydl.extract_info(url, download=False)
+            # If 'entries' key exists and is a list, it's a playlist.
+            # Also, _type: 'playlist' is a strong indicator.
+            if info and (info.get('_type') == 'playlist' or isinstance(info.get('entries'), list)):
+                logger.info(f"URL detected as playlist (lightweight check): {url}")
+                return True
+            logger.debug(f"URL not detected as playlist (lightweight check): {url}")
+            return False
+    except Exception as e:
+        # If yt-dlp errors out on a URL during this light check,
+        # it might be an invalid URL or something yt-dlp can't handle.
+        # Treat as "not a playlist" for this check, full extraction will handle errors.
+        logger.warning(f"Lightweight playlist check failed for {url}: {e}")
+        return False
 
 def download_video(url: str, output_path: str, progress_data: dict, format_id: str = None, is_audio_only: bool = False) -> Optional[str]:
     """Download video using yt-dlp (synchronous function)."""
@@ -183,14 +211,39 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         return
 
-    status_message = await update.message.reply_text("Fetching available formats, please wait...")
+    status_message = await update.message.reply_text("Checking URL type, please wait...")
 
     try:
-        # Extract video information with formats
-        info = extract_video_info(url)
+        # Lightweight playlist check first
+        is_playlist = await asyncio.to_thread(check_if_playlist, url)
+        if is_playlist:
+            await status_message.edit_text(
+                "It looks like this is a playlist URL. "
+                "Currently, I can only process individual video URLs.\n\n"
+                "Please send me the URL of a single video from the playlist."
+            )
+            return
+
+        # If not a playlist, proceed with full format extraction
+        await status_message.edit_text("Fetching available formats, please wait...")
+        info = await asyncio.to_thread(extract_video_info, url)
         
         if not info:
             await status_message.edit_text("Sorry, couldn't extract information from this URL.")
+            return
+            
+        # Fallback check, though the pre-check should catch most playlists.
+        # This handles cases where the lightweight check might miss a playlist structure
+        # or if a single video URL surprisingly returns playlist-like info.
+        if info.get('_type') == 'playlist' or ('entries' in info and isinstance(info.get('entries'), list) and len(info.get('entries', [])) > 1):
+            # Check for len(entries) > 1 because some single videos might have an 'entries' list with one item (themselves)
+            # when certain yt-dlp options are used, though less likely with our current extract_video_info.
+            logger.info(f"URL identified as playlist by fallback check: {url}")
+            await status_message.edit_text(
+                "It looks like this is a playlist URL. "
+                "Currently, I can only process individual video URLs.\n\n"
+                "Please send me the URL of a single video from the playlist."
+            )
             return
             
         title = info.get('title', 'Unknown Video')
@@ -490,7 +543,8 @@ async def download_and_send_video(update: Update, context: ContextTypes.DEFAULT_
                 await status_message.edit_text("Fetching video information...")
             except Exception:
                 pass
-            info = extract_video_info(url)
+            # Run synchronous yt-dlp call in a thread
+            info = await asyncio.to_thread(extract_video_info, url)
             if not info:
                 await status_message.edit_text("Error: Could not extract video information. Please try again with a different URL.")
                 return
