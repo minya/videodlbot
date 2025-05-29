@@ -7,11 +7,10 @@ import threading
 from typing import Optional, Dict, Any
 import validators
 from dotenv import load_dotenv
-from telegram import Message, Update
+from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import asyncio
 import yt_dlp
-from concurrent.futures import ThreadPoolExecutor
 
 # Setup logging
 logging.basicConfig(
@@ -37,17 +36,16 @@ else:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logger.setLevel(logging.INFO)
 
-# Supported platforms
-SUPPORTED_PLATFORMS = ['youtube', 'instagram', 'twitter', 'x.com']
 
 def is_valid_url(url: str) -> bool:
     """Check if the provided URL is valid."""
     return validators.url(url)
 
+EXTRACTORS = yt_dlp.extractor.list_extractors()
+
 def is_supported_platform(url: str) -> bool:
-    """Check if the URL belongs to a supported platform."""
-    for platform in SUPPORTED_PLATFORMS:
-        if platform in url.lower():
+    for ext in EXTRACTORS:
+        if ext.suitable(url):
             return True
     return False
 
