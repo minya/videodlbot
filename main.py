@@ -55,15 +55,13 @@ def is_supported_platform(url: str) -> bool:
 def extract_video_info(url: str) -> Dict[str, Any]:
     """Extract video information using yt-dlp."""
     ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
         'listformats': True,  # Get format information
+        'noplaylist': True,   # Ensure only single video info is processed
+        'skip_download': True, # Don't download, just fetch info
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         logger.info(f"Full video information extracting (for formats): {url}")
-        # Add noplaylist to ensure only single video info is processed
-        ydl_opts['noplaylist'] = True
         info = ydl.extract_info(url, download=False)
         return info
 
@@ -254,13 +252,34 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         # Get available formats
         formats = info.get('formats', [])
-
-        # Filter out formats without essential info
-        formats = [f for f in formats if f.get('format_id')]
+        logger.info(f"Total formats before filtering: {len(formats)}")
+        
+        # Log format info for debugging
+        if DEBUG_MODE:
+            for fmt in formats:
+                logger.debug(f"Format: {fmt.get('format_id')} - {fmt.get('format')} - vcodec: {fmt.get('vcodec')} - acodec: {fmt.get('acodec')}")
+        
+        # Filter out formats without essential info and storyboard formats
+        formats = [f for f in formats if f.get('format_id') and not (fmt.get('format_id', '').startswith('sb') or 'storyboard' in fmt.get('format_note', ''))]
+        logger.info(f"Formats after filtering for format_id and storyboard: {len(formats)}")
 
         # Separate audio and video formats
+        # Video formats - include those with video codec
         video_formats = [f for f in formats if f.get('vcodec') != 'none']
+        # Audio formats - include those with audio codec but no video
         audio_formats = [f for f in formats if f.get('acodec') != 'none' and f.get('vcodec') == 'none']
+        
+        logger.info(f"Video formats: {len(video_formats)}, Audio formats: {len(audio_formats)}")
+        
+        # Log format groups if debugging
+        if DEBUG_MODE:
+            logger.debug("Video formats:")
+            for fmt in video_formats[:5]:  # Show first 5 only to avoid flooding logs
+                logger.debug(f"  {fmt.get('format_id')} - {fmt.get('format')} - Resolution: {fmt.get('resolution', 'N/A')}")
+            
+            logger.debug("Audio formats:")
+            for fmt in audio_formats[:5]:  # Show first 5 only
+                logger.debug(f"  {fmt.get('format_id')} - {fmt.get('format')} - Bitrate: {fmt.get('abr', 'N/A')}kbps")
 
         # Function to get height for sorting
         def get_height(fmt):
@@ -701,7 +720,6 @@ async def download_and_send_video(update: Update, context: ContextTypes.DEFAULT_
                         write_timeout=120
                     )
                 else:
-                    from telegram import Bot
                     bot = context.bot
                     await bot.send_video(
                         chat_id=chat_id,
