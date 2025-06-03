@@ -58,6 +58,20 @@ def extract_video_info(url: str) -> Dict[str, Any]:
         'listformats': True,  # Get format information
         'noplaylist': True,   # Ensure only single video info is processed
         'skip_download': True, # Don't download, just fetch info
+        'geo_bypass': True,  # Bypass geo restrictions
+        'skip_unavailable_fragments': True,
+        'prefer_ffmpeg': True,  # Prefer ffmpeg for processing
+        'dynamic_mpd': True,  # Handle dynamic MPD streams
+        'youtube_include_dash_manifest': True,  # Include DASH manifest for YouTube
+        'youtube_include_hls_manifest': True,  # Include HLS manifest for YouTube
+        'update_time': True,  # Update video time
+        'allow_playlist_files': True,  # Allow playlist files
+        'clean_infojson': True,  # Clean info JSON output
+        'postprocessors': [{
+            'key': 'FFmpegConcat',
+            'only_multi_video': True,
+            'when': 'playlist'
+        }],
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -67,17 +81,11 @@ def extract_video_info(url: str) -> Dict[str, Any]:
 
 def download_video(url: str, output_path: str, progress_data: dict, format_id: str = None, is_audio_only: bool = False) -> Optional[str]:
     """Download video using yt-dlp (synchronous function)."""
-    verbose = DEBUG_MODE
 
     if is_audio_only:
-        # If a specific audio format ID is provided, use it.
-        # Otherwise, default to the best available audio.
         format_selection = format_id if format_id else 'bestaudio/best'
     else:
-        # For video, if a specific video format ID is provided (e.g., from user selection),
-        # combine it with the best available audio stream to ensure sound.
-        # Otherwise (e.g., direct download of 'best'), default to best video with best audio.
-        format_selection = f"{format_id}" if format_id else 'bestvideo+bestaudio/best'
+        format_selection = f"{format_id}+ba" if format_id else 'bestvideo+bestaudio/best'
 
     logger.info(f"Using format selection: {format_selection}, Audio only: {is_audio_only}")
 
@@ -90,23 +98,41 @@ def download_video(url: str, output_path: str, progress_data: dict, format_id: s
         if d['status'] == 'finished':
             logger.info(f"Done downloading: {d.get('filename', 'unknown')} {d.get('_total_bytes_str', 'N/A')}")
         elif d['status'] == 'downloading':
-            logger.debug(f"Downloading: {d.get('_percent_str', 'N/A')} at {d.get('_speed_str', 'N/A')}")
+            pass
+            # logger.debug(f"Downloading: {d.get('_percent_str', 'N/A')} at {d.get('_speed_str', 'N/A')}")
         elif d['status'] == 'error':
             logger.error(f"Error downloading: {d.get('error', 'Unknown error')}")
 
     try:
+        # ydl_opts = {
+        #     'quiet': not verbose,
+        #     'no_warnings': not verbose,
+        #     'verbose': DEBUG_MODE,
+        #     'format': format_selection,
+        #     'age_limit': 21,
+        #     'geo_bypass': True,
+        #     'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
+        #     'outtmpl': output_path,
+        #     'merge_output_format': 'mp4',
+        #     'progress_hooks': [on_progress],
+        #     'noplaylist': True,  # Ensure only the specified video is downloaded
+        # }
         ydl_opts = {
-            'quiet': not verbose,
-            'no_warnings': not verbose,
-            'verbose': verbose,
-            'format': format_selection,
-            'age_limit': 21,
-            'geo_bypass': True,
-            'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
+            # 'listformats': True,  # Get format information
+            'noplaylist': True,   # Ensure only single video info is processed
+            #'skip_download': True, # Don't download, just fetch info
+            'geo_bypass': True,  # Bypass geo restrictions
+            'skip_unavailable_fragments': True,
+            'prefer_ffmpeg': True,  # Prefer ffmpeg for processing
+            'dynamic_mpd': True,  # Handle dynamic MPD streams
+            'youtube_include_dash_manifest': True,  # Include DASH manifest for YouTube
+            'youtube_include_hls_manifest': True,  # Include HLS manifest for YouTube
+            'update_time': True,  # Update video time
+            'allow_playlist_files': True,  # Allow playlist files
+            'clean_infojson': True,  # Clean info JSON output
             'outtmpl': output_path,
-            'merge_output_format': 'mp4',
+            'format': format_selection,
             'progress_hooks': [on_progress],
-            'noplaylist': True,  # Ensure only the specified video is downloaded
         }
         
         # Configure postprocessors based on format type
@@ -117,10 +143,26 @@ def download_video(url: str, output_path: str, progress_data: dict, format_id: s
                 'preferredquality': '192',
             }]
         else:
-            ydl_opts['postprocessors'] = [{
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4',
-            }]
+            ydl_opts['merge_output_format'] = 'mp4'
+            ydl_opts['postprocessors'] = [
+                {
+                    'key': 'FFmpegConcat',
+                    'only_multi_video': False,
+                },
+                {
+                    'key': 'FFmpegVideoConvertor',
+                    'preferedformat': 'mp4',
+                },
+                {
+                    'key': 'FFmpegCopyStream',
+                }
+            ]
+            ydl_opts['postprocessor_args'] = {
+                'copystream': [
+                    '-c:v', 'libx264',
+                    '-c:a', 'copy'
+                ],
+            }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             logger.info(f"Starting download to: {output_path}")
@@ -260,7 +302,12 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 logger.debug(f"Format: {fmt.get('format_id')} - {fmt.get('format')} - vcodec: {fmt.get('vcodec')} - acodec: {fmt.get('acodec')}")
         
         # Filter out formats without essential info and storyboard formats
-        formats = [f for f in formats if f.get('format_id') and not (fmt.get('format_id', '').startswith('sb') or 'storyboard' in fmt.get('format_note', ''))]
+        formats = [f for f in formats
+                   if f.get('format_id') and 
+                   not (
+                       f.get('format_id', '').startswith('sb') or 
+                       'storyboard' in f.get('format_note', '')
+                    )]
         logger.info(f"Formats after filtering for format_id and storyboard: {len(formats)}")
 
         # Separate audio and video formats
@@ -274,11 +321,11 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         # Log format groups if debugging
         if DEBUG_MODE:
             logger.debug("Video formats:")
-            for fmt in video_formats[:5]:  # Show first 5 only to avoid flooding logs
+            for fmt in video_formats:
                 logger.debug(f"  {fmt.get('format_id')} - {fmt.get('format')} - Resolution: {fmt.get('resolution', 'N/A')}")
             
             logger.debug("Audio formats:")
-            for fmt in audio_formats[:5]:  # Show first 5 only
+            for fmt in audio_formats:
                 logger.debug(f"  {fmt.get('format_id')} - {fmt.get('format')} - Bitrate: {fmt.get('abr', 'N/A')}kbps")
 
         # Function to get height for sorting
@@ -341,10 +388,7 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 ext = fmt.get('ext', 'mp4')
 
                 # Get filesize if available
-                filesize = fmt.get('filesize')
-                if not filesize and fmt.get('filesize_approx'):
-                    filesize = fmt.get('filesize_approx')
-                filesize_str = f"{(filesize or 0) / (1024*1024):.1f}MB" if filesize else 'Unknown'
+                filesize_str = get_filesize_str(fmt, info)
 
                 # Format resolution display
                 resolution_str = f"{height}p" if height else fmt.get('resolution', 'Unknown')
@@ -462,6 +506,23 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     except Exception as e:
         logger.error(f"Error preparing format options: {e}")
         await status_message.edit_text(f"An error occurred while fetching formats: {str(e)}")
+
+def get_filesize_str(fmt: Dict[str, Any], info: Dict[str, Any]) -> str:
+    filesize = fmt.get('filesize')
+    approx = False
+    if not filesize and fmt.get('filesize_approx'):
+        filesize = fmt.get('filesize_approx')
+        approx = True
+    if not filesize:
+        # get from tbr
+        tbr = fmt.get('tbr', 0)
+        duration = info.get('duration', 0)
+        if tbr and duration:
+            filesize = (tbr * duration) * (1000/8)
+            approx = True
+
+    approx_prefix = "≈ " if approx else ""
+    return f"{approx_prefix}{(filesize or 0) / (1024*1024):.1f}MB" if filesize else 'Unknown'
 
 async def handle_format_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle format selection from inline keyboard."""
@@ -611,7 +672,7 @@ async def download_and_send_video(update: Update, context: ContextTypes.DEFAULT_
                             file_size = os.path.getsize(temp_path) / (1024 * 1024)  # Size in MB
                             await status_message.edit_text(f"⏬ Downloading... {file_size:.2f} MB downloaded")
                     elif status == 'downloading':
-                        logger.debug(f"Progress data: {progress_data}")
+                        # logger.debug(f"Progress data: {progress_data}")
                         percent = progress_data.get('_percent_str', 'N/A')
                         speed = progress_data.get('_speed_str', 'N/A')
                         eta = progress_data.get('_eta_str', '')
@@ -710,6 +771,10 @@ async def download_and_send_video(update: Update, context: ContextTypes.DEFAULT_
                         write_timeout=120
                     )
             else:
+                formats = info['formats']
+                chosen_format = next((f for f in formats if f.get('format_id') == format_id), None)
+                width = chosen_format.get('width', 0)
+                height = chosen_format.get('height', 0)
                 # Send as video
                 if user_message:
                     await user_message.reply_video(
@@ -725,11 +790,13 @@ async def download_and_send_video(update: Update, context: ContextTypes.DEFAULT_
                         chat_id=chat_id,
                         video=media_file,
                         caption=caption,
+                        duration=info.get('duration', 0),
                         supports_streaming=True,
+                        width=width,
+                        height=height,
                         read_timeout=120,
                         write_timeout=120
                     )
-
         # Send completion message
         success_message = f"✅ Download complete! Your {media_type} has been sent."
 
