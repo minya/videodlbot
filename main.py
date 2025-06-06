@@ -46,6 +46,13 @@ def is_valid_url(url: str) -> bool:
 
 EXTRACTORS = yt_dlp.extractor.list_extractors()
 
+async def try_edit_text(message, text: str) -> None:
+    """Try to edit the message text, handling potential exceptions."""
+    try:
+        await message.edit_text(text)
+    except Exception as e:
+        logger.error(f"Error editing message: {e}")
+
 def is_supported_platform(url: str) -> bool:
     for ext in EXTRACTORS:
         if ext.suitable(url):
@@ -175,7 +182,7 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         # Check file size
         if 'filesize' in info and info['filesize'] and info['filesize'] > MAX_FILE_SIZE:
-            await status_message.edit_text(
+            await try_edit_text(status_message,
                 f"Sorry, the video is too large to send via Telegram "
                 f"(size: {info['filesize'] // 1000000}MB, max: {MAX_FILE_SIZE // 1000000}MB)."
             )
@@ -223,7 +230,7 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                         # No progress data yet, check if file exists and show size
                         if os.path.exists(temp_path):
                             file_size = os.path.getsize(temp_path) / (1024 * 1024)  # Size in MB
-                            await status_message.edit_text(f"Downloading... {file_size:.2f} MB downloaded")
+                            await try_edit_text(status_message, f"Downloading... {file_size:.2f} MB downloaded")
                     elif status == 'downloading':
                         logger.debug(f"Progress data: {progress_data}")
                         percent = progress_data.get('_percent_str', 'N/A')
@@ -236,9 +243,9 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                         if eta:
                             message += f"ETA: {eta}"
                         
-                        await status_message.edit_text(message)
+                        await try_edit_text(status_message, message)
                     elif status == 'finished':
-                        await status_message.edit_text("Download complete. Processing video...")
+                        await try_edit_text(status_message, "Download complete. Processing video...")
                     
                 await asyncio.sleep(0.5)
         except asyncio.CancelledError:
@@ -257,16 +264,16 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             
         # Get the result from the thread
         output_path = download_result[0]
-        
+
         if not output_path or not os.path.exists(output_path):
-            await status_message.edit_text("Sorry, there was an error downloading the video.")
+            await try_edit_text(status_message, "Sorry, there was an error downloading the video.")
             return
 
         logger.info(f"Video downloaded to: {output_path}")
 
         # Check if file exists and size is within limits
         if os.path.getsize(output_path) > MAX_FILE_SIZE:
-            await status_message.edit_text(
+            await try_edit_text(status_message, 
                 f"Sorry, the downloaded video is too large to send via Telegram "
                 f"(size: {os.path.getsize(output_path) // 1048576}MB, max: {MAX_FILE_SIZE // 1048576}MB)."
             )
@@ -274,7 +281,7 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             return
 
         # Send video
-        await status_message.edit_text("Upload in progress...")
+        await try_edit_text(status_message, "Upload in progress...")
 
         caption = f"Title: {info.get('title', 'Unknown')}\nSource: {url}"
         width = None
@@ -301,7 +308,7 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     except Exception as e:
         logger.error(f"Error: {e}")
-        await status_message.edit_text(f"An error occurred: {str(e)}")
+        await try_edit_text(status_message, f"An error occurred: {str(e)}")
 
         # Cleanup in case of error
         try:
