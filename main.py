@@ -29,6 +29,9 @@ MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', 50*1024*1024))  # Default to 50MB
 DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
 ALLOWED_USERS = os.getenv('ALLOWED_USERS', '').split(',')
 
+# constants
+COOKIE_FILE = 'cookies.txt' if os.path.exists('cookies.txt') else None
+
 if DEBUG_MODE:
     logging.getLogger("httpx").setLevel(logging.DEBUG)
     logger.setLevel(logging.DEBUG)
@@ -53,6 +56,7 @@ def extract_video_info(url: str) -> Dict[str, Any]:
     """Extract video information using yt-dlp."""
     ydl_opts = {
         'quiet': True,
+        'cookiefile': COOKIE_FILE,
         'no_warnings': True,
         #'format': 'best[filesize<50M]/best',  # Prefer videos smaller than 50MB
     }
@@ -88,7 +92,7 @@ def download_video(url: str, output_path: str, progress_data: dict) -> Optional[
             'format': format_selection,
             'age_limit': 21,
             'geo_bypass': True,
-            'cookiefile': 'cookies.txt' if os.path.exists('cookies.txt') else None,
+            'cookiefile': COOKIE_FILE,
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
             'progress_hooks': [on_progress],
