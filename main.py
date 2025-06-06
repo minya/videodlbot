@@ -96,10 +96,21 @@ def download_video(url: str, output_path: str, progress_data: dict) -> Optional[
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
             'progress_hooks': [on_progress],
-            'postprocessors': [{
-                'key': 'FFmpegVideoConvertor',
-                'preferedformat': 'mp4',
-            }]  # Ensure output is in mp4 format
+            'postprocessors': [
+                {
+                    'key': 'FFmpegVideoConvertor',
+                    'preferedformat': 'mp4',
+                },
+                {
+                    'key': 'FFmpegCopyStream',
+                }
+            ],
+            'postprocessor_args': {
+                'copystream': [
+                    '-c:v', 'libx264',
+                    '-c:a', 'copy'
+                ],
+            },
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
