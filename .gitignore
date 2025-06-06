@@ -48,5 +48,5 @@ tmp/
 .DS_Store
 Thumbs.db
 
-# cookies
-cookies.txt
+# Secrets
+.secrets/

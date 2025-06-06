@@ -4,6 +4,7 @@ import tempfile
 import shutil
 import time
 import threading
+import uuid
 from typing import Optional, Dict, Any
 import validators
 from dotenv import load_dotenv
@@ -11,6 +12,8 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import asyncio
 import yt_dlp
+import firebase_admin
+from firebase_admin import credentials, storage
 
 # Setup logging
 logging.basicConfig(
@@ -29,8 +32,12 @@ MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', 50*1024*1024))  # Default to 50MB
 DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
 ALLOWED_USERS = os.getenv('ALLOWED_USERS', '').split(',')
 
+# Firebase configuration
+FIREBASE_CREDENTIALS_PATH = os.getenv('FIREBASE_CREDENTIALS_PATH')
+FIREBASE_STORAGE_BUCKET = os.getenv('FIREBASE_STORAGE_BUCKET')
+
 # constants
-COOKIE_FILE = 'cookies.txt' if os.path.exists('cookies.txt') else None
+COOKIE_FILE = '.secrets/cookies.txt' if os.path.exists('.secrets/cookies.txt') else None
 
 if DEBUG_MODE:
     logging.getLogger("httpx").setLevel(logging.DEBUG)
@@ -38,6 +45,20 @@ if DEBUG_MODE:
 else:
     logging.getLogger("httpx").setLevel(logging.WARNING)
     logger.setLevel(logging.INFO)
+
+# Initialize Firebase
+firebase_app = None
+if FIREBASE_CREDENTIALS_PATH and FIREBASE_STORAGE_BUCKET:
+    try:
+        cred = credentials.Certificate(FIREBASE_CREDENTIALS_PATH)
+        firebase_app = firebase_admin.initialize_app(cred, {
+            'storageBucket': FIREBASE_STORAGE_BUCKET
+        })
+        logger.info("Firebase initialized successfully")
+    except Exception as e:
+        logger.warning(f"Failed to initialize Firebase: {e}")
+else:
+    logger.warning("Firebase credentials or bucket not configured")
 
 
 def is_valid_url(url: str) -> bool:
@@ -59,6 +80,30 @@ def is_supported_platform(url: str) -> bool:
             return True
     return False
 
+def upload_to_firebase(file_path: str, filename: str) -> Optional[str]:
+    """Upload file to Firebase Storage and return download URL."""
+    if not firebase_app:
+        logger.error("Firebase not initialized")
+        return None
+    
+    try:
+        bucket = storage.bucket()
+        blob = bucket.blob(f"videos/{filename}")
+        
+        logger.info(f"Uploading {file_path} to Firebase Storage as {filename}")
+        blob.upload_from_filename(file_path)
+        
+        # Make the blob publicly readable
+        blob.make_public()
+        
+        download_url = blob.public_url
+        logger.info(f"File uploaded successfully. Download URL: {download_url}")
+        return download_url
+        
+    except Exception as e:
+        logger.error(f"Error uploading to Firebase: {e}")
+        return None
+
 def extract_video_info(url: str) -> Dict[str, Any]:
     """Extract video information using yt-dlp."""
     ydl_opts = {
@@ -66,6 +111,10 @@ def extract_video_info(url: str) -> Dict[str, Any]:
         'quiet': True,
         'cookiefile': COOKIE_FILE,
         'no_warnings': True,
+        'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio/best/bestvideo+bestaudio',
+        'age_limit': 21,  # Set age limit to 21 years
+        'geo_bypass': True,
+        'extract_flat': True,  # Extract metadata without downloading
         #'format': 'best[filesize<50M]/best',  # Prefer videos smaller than 50MB
     }
 
@@ -149,7 +198,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "How to use this bot:\n\n"
         "1. Send a video URL from YouTube, Instagram, or Twitter/X.\n"
         "2. Wait for the bot to download and send the video.\n\n"
-        "Note: Due to Telegram limitations, videos larger than 50MB cannot be sent."
+        "Note: Videos larger than 50MB will be uploaded to cloud storage and a download link will be provided."
     )
 
 async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -273,12 +322,32 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         logger.info(f"Video downloaded to: {output_path}")
 
         # Check if file exists and size is within limits
-        if os.path.getsize(output_path) > MAX_FILE_SIZE:
-            await try_edit_text(status_message, 
-                f"Sorry, the downloaded video is too large to send via Telegram "
-                f"(size: {os.path.getsize(output_path) // 1048576}MB, max: {MAX_FILE_SIZE // 1048576}MB)."
-            )
+        file_size = os.path.getsize(output_path)
+        if file_size > MAX_FILE_SIZE:
+            # Upload to Firebase Storage instead
+            await status_message.edit_text("File too large for Telegram. Uploading to cloud storage...")
+            
+            # Generate a unique filename
+            unique_filename = f"{uuid.uuid4()}_{info.get('title', 'video').replace(' ', '_')}.mp4"
+            
+            # Upload to Firebase
+            download_url = upload_to_firebase(output_path, unique_filename)
+            
+            if download_url:
+                caption = (f"Title: {info.get('title', 'Unknown')}\n"
+                          f"Size: {file_size // 1048576}MB (too large for Telegram)\n"
+                          f"Download: {download_url}\n"
+                          f"Source: {url}")
+                await update.message.reply_text(caption)
+            else:
+                await status_message.edit_text(
+                    f"Sorry, failed to upload the video to cloud storage. "
+                    f"The video is {file_size // 1048576}MB which exceeds Telegram's {MAX_FILE_SIZE // 1048576}MB limit."
+                )
+            
             os.unlink(output_path)
+            shutil.rmtree(temp_dir)
+            await status_message.delete()
             return
 
         # Send video
@@ -349,6 +418,8 @@ def main() -> None:
         logger.info("Debug mode is enabled. Verbose logging will be used.")
 
     logger.info("Max file size for downloads: %d MB", MAX_FILE_SIZE // (1024 * 1024))
+    logger.info("Allowed users: %s", ', '.join(ALLOWED_USERS) if ALLOWED_USERS else "None")
+    logger.info("Use cookie: %s", "Yes" if COOKIE_FILE else "No")
     # Run the bot until the user presses Ctrl-C
     application.run_polling(allowed_updates=Update.ALL_TYPES)
 
