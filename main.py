@@ -266,10 +266,18 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await status_message.edit_text("Upload in progress...")
 
         caption = f"Title: {info.get('title', 'Unknown')}\nSource: {url}"
+        width = None
+        height = None
+        video_formats = info.get('formats', [])
+        if video_formats:
+            width = video_formats[0].get('width', None)
+            height = video_formats[0].get('height', None)
         with open(output_path, 'rb') as video_file:
             await update.message.reply_video(
                 video=video_file,
                 caption=caption,
+                width=width,
+                height=height,
                 supports_streaming=True,
                 read_timeout=120,
                 write_timeout=120
