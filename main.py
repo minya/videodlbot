@@ -62,6 +62,7 @@ def is_supported_platform(url: str) -> bool:
 def extract_video_info(url: str) -> Dict[str, Any]:
     """Extract video information using yt-dlp."""
     ydl_opts = {
+        'verbose': DEBUG_MODE,
         'quiet': True,
         'cookiefile': COOKIE_FILE,
         'no_warnings': True,
