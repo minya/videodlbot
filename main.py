@@ -8,7 +8,7 @@ import uuid
 from typing import Optional, Dict, Any
 import validators
 from dotenv import load_dotenv
-from telegram import Update
+from telegram import Message, Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 import asyncio
 import yt_dlp
@@ -67,7 +67,7 @@ def is_valid_url(url: str) -> bool:
 
 EXTRACTORS = yt_dlp.extractor.list_extractors()
 
-async def try_edit_text(message, text: str) -> None:
+async def try_edit_text(message: Message, text: str) -> None:
     """Try to edit the message text, handling potential exceptions."""
     try:
         await message.edit_text(text)
@@ -130,16 +130,12 @@ def download_video(url: str, output_path: str, progress_data: dict) -> Optional[
     
     # This progress hook captures download info in the shared progress_data dictionary
     def on_progress(d):
-        # Update the shared progress data with a copy of the dictionary to avoid reference issues
         progress_data.clear()
-        progress_data.update(d.copy())
-        
-        if d['status'] == 'finished':
-            logger.info(f"Done downloading video: {d.get('filename', 'unknown')} {d.get('_total_bytes_str', 'N/A')}")
-        elif d['status'] == 'downloading':
-            logger.debug(f"Downloading: {d.get('_percent_str', 'N/A')} at {d.get('_speed_str', 'N/A')}")
-        elif d['status'] == 'error':
-            logger.error(f"Error downloading: {d.get('error', 'Unknown error')}")
+        progress_data.update({'download_progress': d.copy()})
+
+    def on_postprocess(d):
+        progress_data.clear()
+        progress_data.update({ 'postprocess_progress': d.copy() })
     
     try:
         ydl_opts = {
@@ -168,6 +164,7 @@ def download_video(url: str, output_path: str, progress_data: dict) -> Optional[
                     '-c:a', 'copy'
                 ],
             },
+            'postprocessor_hooks': [on_postprocess],
         }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -263,7 +260,8 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         thread = threading.Thread(target=download_thread)
         thread.daemon = True  # Make thread daemon so it doesn't block program exit
         thread.start()
-        
+
+        prev_message = ''
         # Update status message periodically while downloading
         try:
             last_update_time = 0
@@ -272,30 +270,40 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 current_time = time.time()
                 if current_time - last_update_time >= 1.5:  # Update every 1.5 seconds
                     last_update_time = current_time
+                    message = ''
                     
-                    # Get progress info from the shared dictionary
-                    status = progress_data.get('status', '')
-                    
-                    if not progress_data:
-                        # No progress data yet, check if file exists and show size
-                        if os.path.exists(temp_path):
-                            file_size = os.path.getsize(temp_path) / (1024 * 1024)  # Size in MB
-                            await try_edit_text(status_message, f"Downloading... {file_size:.2f} MB downloaded")
-                    elif status == 'downloading':
-                        logger.debug(f"Progress data: {progress_data}")
-                        percent = progress_data.get('_percent_str', 'N/A')
-                        speed = progress_data.get('_speed_str', 'N/A')
-                        eta = progress_data.get('_eta_str', '')
-                        filename = progress_data.get('filename', 'video')
+                    if 'download_progress' in progress_data:
+                        dl_progress_data = progress_data.get('download_progress', {})
+                        status = dl_progress_data.get('status', '')
                         
-                        message = f"Downloading {os.path.basename(filename)}...\n"
-                        message += f"Progress: {percent} at {speed}\n"
-                        if eta:
-                            message += f"ETA: {eta}"
-                        
+                        if not dl_progress_data:
+                            # No progress data yet, check if file exists and show size
+                            if os.path.exists(temp_path):
+                                file_size = os.path.getsize(temp_path) / (1024 * 1024)  # Size in MB
+                                message = f"Downloading... {file_size:.2f} MB downloaded"
+                        elif status == 'downloading':
+                            logger.debug(f"Progress data: {dl_progress_data}")
+                            percent = dl_progress_data.get('_percent_str', 'N/A')
+                            speed = dl_progress_data.get('_speed_str', 'N/A')
+                            eta = dl_progress_data.get('_eta_str', '')
+                            filename = dl_progress_data.get('filename', 'video')
+                            
+                            message = f"Downloading {os.path.basename(filename)}...\n"
+                            message += f"Progress: {percent} at {speed}\n"
+                            if eta:
+                                message += f"ETA: {eta}"
+                            
+                        elif status == 'finished':
+                            message = "Download complete. Processing video..."
+                    elif 'postprocess_progress' in progress_data:
+                        pp_progress_data = progress_data.get('postprocess_progress', {})
+                        status = pp_progress_data.get('status', 'unknown status')
+                        postprocessor = pp_progress_data.get('postprocessor', 'unknown postprocessor')
+                        message = f"Postprocessing with {postprocessor}...\nStatus: {status}"
+
+                    if prev_message != message:
                         await try_edit_text(status_message, message)
-                    elif status == 'finished':
-                        await try_edit_text(status_message, "Download complete. Processing video...")
+                        prev_message = message
                     
                 await asyncio.sleep(0.5)
         except asyncio.CancelledError:
