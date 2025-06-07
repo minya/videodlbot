@@ -26,21 +26,21 @@ logger = logging.getLogger(__name__)
 # Load environment variables
 load_dotenv()
 
+# constants
+COOKIE_FILE = '.secrets/cookies.txt' if os.path.exists('.secrets/cookies.txt') else None
+BYTES_MB=1048576
+MAX_TELEGRAM_FILE_SIZE = 50 * BYTES_MB  # 50MB for Telegram file size limit
+
 # Bot configuration
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', 500*1024*1024))  # Default to 500MB
+_MAX_FILE_SIZE_STR = os.getenv('MAX_FILE_SIZE', '')
+MAX_FILE_SIZE = int(_MAX_FILE_SIZE_STR) * BYTES_MB if _MAX_FILE_SIZE_STR else 500 * BYTES_MB  # Default to 500MB
 DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
 ALLOWED_USERS = os.getenv('ALLOWED_USERS', '').split(',')
 
 # Firebase configuration
 FIREBASE_CREDENTIALS_PATH = os.getenv('FIREBASE_CREDENTIALS_PATH')
 FIREBASE_STORAGE_BUCKET = os.getenv('FIREBASE_STORAGE_BUCKET')
-
-# constants
-COOKIE_FILE = '.secrets/cookies.txt' if os.path.exists('.secrets/cookies.txt') else None
-BYTES_MB=1048576
-MAX_TELEGRAM_FILE_SIZE = 50 * BYTES_MB  # 50MB for Telegram file size limit
-
 if DEBUG_MODE:
     logging.getLogger("httpx").setLevel(logging.DEBUG)
     logger.setLevel(logging.DEBUG)
@@ -462,7 +462,7 @@ def main() -> None:
     if DEBUG_MODE:
         logger.info("Debug mode is enabled. Verbose logging will be used.")
 
-    logger.info("Max file size for downloads: %d MB", MAX_FILE_SIZE // (1024 * 1024))
+    logger.info("Max file size for downloads: %d MB", MAX_FILE_SIZE // (BYTES_MB))
     logger.info("Allowed users: %s", ', '.join(ALLOWED_USERS) if ALLOWED_USERS else "None")
     logger.info("Use cookie: %s", "Yes" if COOKIE_FILE else "No")
     # Run the bot until the user presses Ctrl-C
