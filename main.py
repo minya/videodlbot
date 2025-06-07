@@ -28,7 +28,7 @@ load_dotenv()
 
 # Bot configuration
 BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
-MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', 50*1024*1024))  # Default to 50MB
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', 500*1024*1024))  # Default to 500MB
 DEBUG_MODE = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
 ALLOWED_USERS = os.getenv('ALLOWED_USERS', '').split(',')
 
@@ -38,6 +38,8 @@ FIREBASE_STORAGE_BUCKET = os.getenv('FIREBASE_STORAGE_BUCKET')
 
 # constants
 COOKIE_FILE = '.secrets/cookies.txt' if os.path.exists('.secrets/cookies.txt') else None
+BYTES_MB=1048576
+MAX_TELEGRAM_FILE_SIZE = 50 * BYTES_MB  # 50MB for Telegram file size limit
 
 if DEBUG_MODE:
     logging.getLogger("httpx").setLevel(logging.DEBUG)
@@ -104,18 +106,19 @@ def upload_to_firebase(file_path: str, filename: str) -> Optional[str]:
         logger.error(f"Error uploading to Firebase: {e}")
         return None
 
+format_selection = 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio/best/bestvideo+bestaudio'
+
 def extract_video_info(url: str) -> Dict[str, Any]:
     """Extract video information using yt-dlp."""
     ydl_opts = {
-        'verbose': DEBUG_MODE,
-        'quiet': True,
+        'age_limit': 21,
         'cookiefile': COOKIE_FILE,
-        'no_warnings': True,
-        'format': 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio/best/bestvideo+bestaudio',
-        'age_limit': 21,  # Set age limit to 21 years
+        'extract_flat': True,
+        'format': format_selection,
         'geo_bypass': True,
-        'extract_flat': True,  # Extract metadata without downloading
-        #'format': 'best[filesize<50M]/best',  # Prefer videos smaller than 50MB
+        'no_warnings': True,
+        'quiet': True,
+        'verbose': DEBUG_MODE,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -123,20 +126,51 @@ def extract_video_info(url: str) -> Dict[str, Any]:
         info = ydl.extract_info(url, download=False)
         return info
 
-def download_video(url: str, output_path: str, progress_data: dict) -> Optional[str]:
+def need_convert_vcodec(vcodec: str) -> bool:
+    """Check if the video codec needs conversion."""
+    if not vcodec:
+        return True
+    if vcodec.startswith('avc1'):
+        vcodec = 'h264'
+    elif vcodec.startswith('av01'):
+        vcodec = 'av01'
+    elif vcodec.startswith('hvc1'):
+        vcodec = 'h265'
+    elif vcodec.startswith('hevc'):
+        vcodec = 'h265'
+    elif vcodec.startswith('h264'):
+        vcodec = 'h264'
+    elif vcodec.startswith('h265'):
+        vcodec = 'h265'
+    return vcodec not in ['h264', 'h265', 'avc1', 'av01']
+
+def need_convert_acodec(acodec: str) -> bool:
+    """Check if the audio codec needs conversion."""
+    return acodec not in ['aac', 'mp4a.40.2', 'mp4a.40.5', 'mp4a.40.29']
+
+def download_video(url: str, info: dict[str, any], output_path: str, progress_data: dict) -> Optional[str]:
     """Download video using yt-dlp (synchronous function)."""
-    verbose = DEBUG_MODE
-    format_selection = 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio/best/bestvideo+bestaudio'
     
     # This progress hook captures download info in the shared progress_data dictionary
     def on_progress(d):
         progress_data.clear()
-        progress_data.update({'download_progress': d.copy()})
+        progress_data.update({ 'download_progress': d.copy() })
 
     def on_postprocess(d):
         progress_data.clear()
         progress_data.update({ 'postprocess_progress': d.copy() })
-    
+
+    vcodec = info.get('vcodec', '')
+    acodec = info.get('acodec', '')
+    extractor = info.get('extractor', '')
+
+    need_convert = \
+        extractor == 'youtube' and \
+        (need_convert_vcodec(vcodec) or \
+        need_convert_acodec(acodec))
+
+    logger.info(f"Video codec: {vcodec}, Audio codec: {acodec}, Extractor: {extractor} Need convert: {need_convert}")
+    verbose = DEBUG_MODE
     try:
         ydl_opts = {
             'quiet': not verbose,
@@ -149,23 +183,27 @@ def download_video(url: str, output_path: str, progress_data: dict) -> Optional[
             'outtmpl': output_path,
             'merge_output_format': 'mp4',
             'progress_hooks': [on_progress],
+            'postprocessor_hooks': [on_postprocess],
             'postprocessors': [
                 {
                     'key': 'FFmpegVideoConvertor',
                     'preferedformat': 'mp4',
                 },
-                {
-                    'key': 'FFmpegCopyStream',
-                }
             ],
-            'postprocessor_args': {
-                'copystream': [
-                    '-c:v', 'libx264',
-                    '-c:a', 'copy'
-                ],
-            },
-            'postprocessor_hooks': [on_postprocess],
         }
+
+        if need_convert:
+            ydl_opts['postprocessors'].append({
+                    'key': 'FFmpegCopyStream',
+            })
+            v_a = 'libx264' if need_convert_vcodec(vcodec) else 'copy'
+            c_a = 'aac' if need_convert_acodec(acodec) else 'copy'
+            ydl_opts['postprocessor_args'] = {
+                'copystream': [
+                    '-c:v', f'{v_a}',
+                    '-c:a', f'{c_a}',
+                ],
+            }
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             logger.info(f"Starting download to: {output_path}")
@@ -230,8 +268,8 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         # Check file size
         if 'filesize' in info and info['filesize'] and info['filesize'] > MAX_FILE_SIZE:
             await try_edit_text(status_message,
-                f"Sorry, the video is too large to send via Telegram "
-                f"(size: {info['filesize'] // 1000000}MB, max: {MAX_FILE_SIZE // 1000000}MB)."
+                f"Sorry, the video is too large"
+                f"(size: {info['filesize'] // BYTES_MB}MB, max: {MAX_FILE_SIZE // BYTES_MB}MB supported)."
             )
             return
 
@@ -248,12 +286,13 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         
         def download_thread():
             try:
-                result = download_video(url, temp_path, progress_data)
+                result = download_video(url, info, temp_path, progress_data)
                 download_result[0] = result
             except Exception as e:
                 logger.error(f"Error in download thread: {e}")
                 download_error[0] = e
             finally:
+                logger.info("Download thread completed")
                 download_complete.set()
         
         # Start the download in a separate thread
@@ -331,7 +370,7 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         # Check if file exists and size is within limits
         file_size = os.path.getsize(output_path)
-        if file_size > MAX_FILE_SIZE:
+        if file_size > MAX_TELEGRAM_FILE_SIZE:
             # Upload to Firebase Storage instead
             await status_message.edit_text("File too large for Telegram. Uploading to cloud storage...")
             
@@ -343,14 +382,14 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             
             if download_url:
                 caption = (f"Title: {info.get('title', 'Unknown')}\n"
-                          f"Size: {file_size // 1048576}MB (too large for Telegram)\n"
+                          f"Size: {file_size // BYTES_MB}MB (too large for Telegram)\n"
                           f"Download: {download_url}\n"
                           f"Source: {url}")
                 await update.message.reply_text(caption)
             else:
                 await status_message.edit_text(
                     f"Sorry, failed to upload the video to cloud storage. "
-                    f"The video is {file_size // 1048576}MB which exceeds Telegram's {MAX_FILE_SIZE // 1048576}MB limit."
+                    f"The video is {file_size // BYTES_MB}MB which exceeds Telegram's {MAX_TELEGRAM_FILE_SIZE // BYTES_MB}MB limit."
                 )
             
             os.unlink(output_path)
@@ -362,12 +401,10 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await try_edit_text(status_message, "Upload in progress...")
 
         caption = f"Title: {info.get('title', 'Unknown')}\nSource: {url}"
-        width = None
-        height = None
-        video_formats = info.get('formats', [])
-        if video_formats:
-            width = video_formats[0].get('width', None)
-            height = video_formats[0].get('height', None)
+
+        width = info.get('width', None)
+        height = info.get('height', None)
+
         with open(output_path, 'rb') as video_file:
             await update.message.reply_video(
                 video=video_file,
