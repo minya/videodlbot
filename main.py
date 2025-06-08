@@ -236,6 +236,28 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "Note: Videos larger than 50MB will be uploaded to cloud storage and a download link will be provided."
     )
 
+def build_download_progress_message(progress_data: dict) -> str:
+    """Build a formatted message for download progress."""
+    total_bytes = progress_data.get('total_bytes', 0)
+    downloaded_bytes = progress_data.get('downloaded_bytes', 0)
+    eta = progress_data.get('eta', 0)
+    filename = os.path.basename(progress_data.get('filename', 'video'))
+    speed = progress_data.get('speed', None)
+    speed_mbps = (speed / BYTES_MB) if speed else 0
+    speed_mbps_str = f"{speed_mbps:.2f} MiB/s" if speed_mbps > 0 else "N/A"
+
+    percent = (downloaded_bytes / total_bytes * 100) if total_bytes > 0 else 0
+    return (f"Downloading {filename}...\t[{percent:.2f}%]\n"
+            f"Downloaded: {downloaded_bytes / BYTES_MB:.2f} MiB at {speed_mbps_str}\n"
+            f"Total: {total_bytes / BYTES_MB:.2f} MiB\n"
+            f"ETA: {eta:.0f} seconds")
+
+def build_pp_progress_message(progress_data: dict) -> str:
+    status = progress_data.get('status', 'unknown status')
+    postprocessor = progress_data.get('postprocessor', 'unknown postprocessor')
+    message = f"Postprocessing with {postprocessor}...\nStatus: {status}"
+    return message
+
 async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user = update.effective_user
     if str(user.id) not in ALLOWED_USERS:
@@ -275,7 +297,7 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         # Create temporary directory for download
         temp_dir = tempfile.mkdtemp()
-        temp_path = os.path.join(temp_dir, "downloaded_video.mp4")
+        temp_path = os.path.join(temp_dir, "video.mp4")
         logger.info(f"Temporary directory created: {temp_dir}. Will download to: {temp_path}")
 
         # Create a thread to download the video
@@ -322,23 +344,13 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                                 message = f"Downloading... {file_size:.2f} MB downloaded"
                         elif status == 'downloading':
                             logger.debug(f"Progress data: {dl_progress_data}")
-                            percent = dl_progress_data.get('_percent_str', 'N/A')
-                            speed = dl_progress_data.get('_speed_str', 'N/A')
-                            eta = dl_progress_data.get('_eta_str', '')
-                            filename = dl_progress_data.get('filename', 'video')
-                            
-                            message = f"Downloading {os.path.basename(filename)}...\n"
-                            message += f"Progress: {percent} at {speed}\n"
-                            if eta:
-                                message += f"ETA: {eta}"
+                            message = build_download_progress_message(dl_progress_data)
                             
                         elif status == 'finished':
                             message = "Download complete. Processing video..."
                     elif 'postprocess_progress' in progress_data:
                         pp_progress_data = progress_data.get('postprocess_progress', {})
-                        status = pp_progress_data.get('status', 'unknown status')
-                        postprocessor = pp_progress_data.get('postprocessor', 'unknown postprocessor')
-                        message = f"Postprocessing with {postprocessor}...\nStatus: {status}"
+                        message = build_pp_progress_message(pp_progress_data)
 
                     if prev_message != message:
                         await try_edit_text(status_message, message)
