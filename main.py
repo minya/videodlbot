@@ -262,7 +262,7 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     user = update.effective_user
     if str(user.id) not in ALLOWED_USERS:
         await update.message.reply_text("You are not authorized to use this bot.")
-        logger.warning(f"Unauthorized access attempt by user: {user.id}")
+        logger.warning(f"Unauthorized access attempt by user: {user.id} {user.username} {user.full_name}")
         return
 
     """Process the URL and download the video."""
