@@ -18,6 +18,32 @@ from .progress import build_download_progress_message, build_pp_progress_message
 logger = logging.getLogger(__name__)
 
 
+class DownloadContext:
+    def __init__(self, url: str, info: dict, temp_dir: str, temp_path: str):
+        self.url = url
+        self.info = info
+        self.temp_dir = temp_dir
+        self.temp_path = temp_path
+        self.download_complete = threading.Event()
+        self.download_result = [None]
+        self.download_error = [None]
+        self.progress_data = {}
+        self.thread = None
+        
+    def cleanup(self):
+        try:
+            if self.thread and self.thread.is_alive():
+                logger.info("Waiting for download thread to finish...")
+                self.thread.join(timeout=2)
+                
+            if self.download_result[0] and os.path.exists(self.download_result[0]):
+                os.unlink(self.download_result[0])
+            if self.temp_dir and os.path.exists(self.temp_dir):
+                shutil.rmtree(self.temp_dir)
+        except Exception as cleanup_error:
+            logger.error(f"Error during cleanup: {cleanup_error}")
+
+
 async def try_edit_text(message: Message, text: str) -> None:
     try:
         await message.edit_text(text)
@@ -43,106 +69,176 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
-async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    user = update.effective_user
+async def _validate_user_access(user, update) -> bool:
     if str(user.id) not in settings.ALLOWED_USERS:
         await update.message.reply_text("You are not authorized to use this bot.")
         logger.warning(f"Unauthorized access attempt by user: {user.id} {user.username} {user.full_name}")
-        return
+        return False
+    return True
 
-    url = update.message.text.strip()
 
+async def _validate_url(url: str, update) -> bool:
     if not is_valid_url(url):
         await update.message.reply_text("Please provide a valid URL.")
-        return
-
+        return False
+        
     if not is_supported_platform(url):
         await update.message.reply_text(
             "Sorry, this URL is not from a supported platform.\n"
             "I can download videos from YouTube, Instagram, and Twitter/X."
         )
+        return False
+    return True
+
+
+async def _check_file_size(info: dict, status_message) -> bool:
+    if 'filesize' in info and info['filesize'] and info['filesize'] > settings.MAX_FILE_SIZE:
+        await try_edit_text(status_message,
+            f"Sorry, the video is too large"
+            f"(size: {info['filesize'] // settings.BYTES_MB}MB, max: {settings.MAX_FILE_SIZE // settings.BYTES_MB}MB supported)."
+        )
+        return False
+    return True
+
+
+def _create_download_thread(ctx: DownloadContext):
+    def download_thread():
+        try:
+            result = download_video(ctx.url, ctx.info, ctx.temp_path, ctx.progress_data)
+            ctx.download_result[0] = result
+        except Exception as e:
+            logger.error(f"Error in download thread: {e}")
+            ctx.download_error[0] = e
+        finally:
+            logger.info("Download thread completed")
+            ctx.download_complete.set()
+    
+    ctx.thread = threading.Thread(target=download_thread)
+    ctx.thread.daemon = True
+    ctx.thread.start()
+
+
+async def _monitor_download_progress(ctx: DownloadContext, status_message):
+    prev_message = ''
+    last_update_time = 0
+    
+    while not ctx.download_complete.is_set():
+        current_time = time.time()
+        if current_time - last_update_time >= 1.5:
+            last_update_time = current_time
+            message = _build_progress_message(ctx)
+
+            if prev_message != message and message:
+                await try_edit_text(status_message, message)
+                prev_message = message
+            
+        await asyncio.sleep(0.5)
+
+
+def _build_progress_message(ctx: DownloadContext) -> str:
+    if 'download_progress' in ctx.progress_data:
+        dl_progress_data = ctx.progress_data.get('download_progress', {})
+        status = dl_progress_data.get('status', '')
+        
+        if not dl_progress_data and os.path.exists(ctx.temp_path):
+            file_size = os.path.getsize(ctx.temp_path) / (1024 * 1024)
+            return f"Downloading... {file_size:.2f} MB downloaded"
+        elif status == 'downloading':
+            logger.debug(f"Progress data: {dl_progress_data}")
+            return build_download_progress_message(dl_progress_data)
+        elif status == 'finished':
+            return "Download complete. Processing video..."
+    elif 'postprocess_progress' in ctx.progress_data:
+        pp_progress_data = ctx.progress_data.get('postprocess_progress', {})
+        return build_pp_progress_message(pp_progress_data)
+    return ''
+
+
+async def _handle_large_file(output_path: str, info: dict, url: str, update, status_message) -> bool:
+    file_size = os.path.getsize(output_path)
+    if file_size <= settings.MAX_TELEGRAM_FILE_SIZE:
+        return False
+        
+    await status_message.edit_text("File too large for Telegram. Uploading to cloud storage...")
+    
+    unique_filename = f"{uuid.uuid4()}_{info.get('title', 'video').replace(' ', '_')}.mp4"
+    download_url = upload_to_firebase(output_path, unique_filename)
+    
+    if download_url:
+        caption = (f"Title: {info.get('title', 'Unknown')}\n"
+                  f"Size: {file_size // settings.BYTES_MB}MB (too large for Telegram)\n"
+                  f"Download: {download_url}\n"
+                  f"Source: {url}")
+        await update.message.reply_text(caption)
+    else:
+        await status_message.edit_text(
+            f"Sorry, failed to upload the video to cloud storage. "
+            f"The video is {file_size // settings.BYTES_MB}MB which exceeds Telegram's {settings.MAX_TELEGRAM_FILE_SIZE // settings.BYTES_MB}MB limit."
+        )
+    return True
+
+
+async def _send_video_to_telegram(output_path: str, info: dict, url: str, update, status_message):
+    await try_edit_text(status_message, "Upload in progress...")
+
+    caption = f"Title: {info.get('title', 'Unknown')}\nSource: {url}"
+    width = info.get('width', None)
+    height = info.get('height', None)
+
+    with open(output_path, 'rb') as video_file:
+        await update.message.reply_video(
+            video=video_file,
+            caption=caption,
+            width=width,
+            height=height,
+            supports_streaming=True,
+            read_timeout=120,
+            write_timeout=120
+        )
+
+
+async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = update.effective_user
+    
+    if not await _validate_user_access(user, update):
+        return
+
+    url = update.message.text.strip()
+    
+    if not await _validate_url(url, update):
         return
 
     status_message = await update.message.reply_text("Downloading video, please wait...")
+    ctx = None
 
     try:
         info = extract_video_info(url)
-
-        if 'filesize' in info and info['filesize'] and info['filesize'] > settings.MAX_FILE_SIZE:
-            await try_edit_text(status_message,
-                f"Sorry, the video is too large"
-                f"(size: {info['filesize'] // settings.BYTES_MB}MB, max: {settings.MAX_FILE_SIZE // settings.BYTES_MB}MB supported)."
-            )
+        
+        if not await _check_file_size(info, status_message):
             return
 
         temp_dir = tempfile.mkdtemp()
         temp_path = os.path.join(temp_dir, "video.mp4")
         logger.info(f"Temporary directory created: {temp_dir}. Will download to: {temp_path}")
 
-        download_complete = threading.Event()
-        download_result = [None]
-        download_error = [None]
-        progress_data = {}
-        
-        def download_thread():
-            try:
-                result = download_video(url, info, temp_path, progress_data)
-                download_result[0] = result
-            except Exception as e:
-                logger.error(f"Error in download thread: {e}")
-                download_error[0] = e
-            finally:
-                logger.info("Download thread completed")
-                download_complete.set()
-        
-        thread = threading.Thread(target=download_thread)
-        thread.daemon = True
-        thread.start()
+        ctx = DownloadContext(url, info, temp_dir, temp_path)
+        _create_download_thread(ctx)
 
-        prev_message = ''
         try:
-            last_update_time = 0
-            while not download_complete.is_set():
-                current_time = time.time()
-                if current_time - last_update_time >= 1.5:
-                    last_update_time = current_time
-                    message = ''
-                    
-                    if 'download_progress' in progress_data:
-                        dl_progress_data = progress_data.get('download_progress', {})
-                        status = dl_progress_data.get('status', '')
-                        
-                        if not dl_progress_data:
-                            if os.path.exists(temp_path):
-                                file_size = os.path.getsize(temp_path) / (1024 * 1024)
-                                message = f"Downloading... {file_size:.2f} MB downloaded"
-                        elif status == 'downloading':
-                            logger.debug(f"Progress data: {dl_progress_data}")
-                            message = build_download_progress_message(dl_progress_data)
-                        elif status == 'finished':
-                            message = "Download complete. Processing video..."
-                    elif 'postprocess_progress' in progress_data:
-                        pp_progress_data = progress_data.get('postprocess_progress', {})
-                        message = build_pp_progress_message(pp_progress_data)
-
-                    if prev_message != message:
-                        await try_edit_text(status_message, message)
-                        prev_message = message
-                    
-                await asyncio.sleep(0.5)
+            await _monitor_download_progress(ctx, status_message)
         except asyncio.CancelledError:
             logger.warning("Download status updates were cancelled")
             raise
         except Exception as e:
             logger.error(f"Error while updating status: {e}")
         
-        if thread.is_alive():
-            thread.join(timeout=5)
+        if ctx.thread.is_alive():
+            ctx.thread.join(timeout=5)
             
-        if download_error[0]:
-            raise download_error[0]
+        if ctx.download_error[0]:
+            raise ctx.download_error[0]
             
-        output_path = download_result[0]
+        output_path = ctx.download_result[0]
 
         if not output_path or not os.path.exists(output_path):
             await try_edit_text(status_message, "Sorry, there was an error downloading the video.")
@@ -150,64 +246,17 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         logger.info(f"Video downloaded to: {output_path}")
 
-        file_size = os.path.getsize(output_path)
-        if file_size > settings.MAX_TELEGRAM_FILE_SIZE:
-            await status_message.edit_text("File too large for Telegram. Uploading to cloud storage...")
-            
-            unique_filename = f"{uuid.uuid4()}_{info.get('title', 'video').replace(' ', '_')}.mp4"
-            
-            download_url = upload_to_firebase(output_path, unique_filename)
-            
-            if download_url:
-                caption = (f"Title: {info.get('title', 'Unknown')}\n"
-                          f"Size: {file_size // settings.BYTES_MB}MB (too large for Telegram)\n"
-                          f"Download: {download_url}\n"
-                          f"Source: {url}")
-                await update.message.reply_text(caption)
-            else:
-                await status_message.edit_text(
-                    f"Sorry, failed to upload the video to cloud storage. "
-                    f"The video is {file_size // settings.BYTES_MB}MB which exceeds Telegram's {settings.MAX_TELEGRAM_FILE_SIZE // settings.BYTES_MB}MB limit."
-                )
-            
-            os.unlink(output_path)
-            shutil.rmtree(temp_dir)
+        if await _handle_large_file(output_path, info, url, update, status_message):
+            ctx.cleanup()
             await status_message.delete()
             return
 
-        await try_edit_text(status_message, "Upload in progress...")
-
-        caption = f"Title: {info.get('title', 'Unknown')}\nSource: {url}"
-        width = info.get('width', None)
-        height = info.get('height', None)
-
-        with open(output_path, 'rb') as video_file:
-            await update.message.reply_video(
-                video=video_file,
-                caption=caption,
-                width=width,
-                height=height,
-                supports_streaming=True,
-                read_timeout=120,
-                write_timeout=120
-            )
-
-        os.unlink(output_path)
-        shutil.rmtree(temp_dir)
+        await _send_video_to_telegram(output_path, info, url, update, status_message)
+        ctx.cleanup()
         await status_message.delete()
 
     except Exception as e:
         logger.error(f"Error: {e}")
         await try_edit_text(status_message, f"An error occurred: {str(e)}")
-
-        try:
-            if 'thread' in locals() and thread.is_alive():
-                logger.info("Waiting for download thread to finish...")
-                thread.join(timeout=2)
-                
-            if 'output_path' in locals() and output_path and os.path.exists(output_path):
-                os.unlink(output_path)
-            if 'temp_dir' in locals() and temp_dir and os.path.exists(temp_dir):
-                shutil.rmtree(temp_dir)
-        except Exception as cleanup_error:
-            logger.error(f"Error during cleanup after exception: {cleanup_error}")
+        if ctx:
+            ctx.cleanup()
