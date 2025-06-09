@@ -5,6 +5,8 @@ import logging
 from urllib.parse import urlparse
 import yt_dlp
 
+from src.videodlbot.utils import is_valid_url as is_url
+
 # Configure logging
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -12,13 +14,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-def is_url(url):
-    """Check if the string is a URL."""
-    try:
-        result = urlparse(url)
-        return all([result.scheme, result.netloc])
-    except Exception:
-        return False
 
 def test_extraction(url, verbose=False):
     """Test yt-dlp's ability to extract information from a URL."""
