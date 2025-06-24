@@ -2,7 +2,7 @@ import os
 import logging
 from typing import Dict
 
-from ..config import settings
+from ..utils import BYTES_MB
 
 logger = logging.getLogger(__name__)
 
@@ -13,13 +13,13 @@ def build_download_progress_message(progress_data: Dict) -> str:
     eta = progress_data.get('eta', 0)
     filename = os.path.basename(progress_data.get('filename', 'video'))
     speed = progress_data.get('speed', None)
-    speed_mbps = (speed / settings.BYTES_MB) if speed else 0
+    speed_mbps = (speed / BYTES_MB) if speed else 0
     speed_mbps_str = f"{speed_mbps:.2f} MiB/s" if speed_mbps > 0 else "N/A"
 
     percent = (downloaded_bytes / total_bytes * 100) if total_bytes > 0 else 0
     return (f"Downloading {filename}...\t[{percent:.2f}%]\n"
-            f"Downloaded: {downloaded_bytes / settings.BYTES_MB:.2f} MiB at {speed_mbps_str}\n"
-            f"Total: {total_bytes / settings.BYTES_MB:.2f} MiB\n"
+            f"Downloaded: {downloaded_bytes / BYTES_MB:.2f} MiB at {speed_mbps_str}\n"
+            f"Total: {total_bytes / BYTES_MB:.2f} MiB\n"
             f"ETA: {eta:.0f} seconds")
 
 

@@ -3,6 +3,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters
 
 from src.videodlbot.config import settings
+from src.videodlbot.utils import BYTES_MB
 from src.videodlbot.storage import initialize_firebase
 from src.videodlbot.bot import start, help_command, process_url
 
@@ -38,7 +39,7 @@ def main() -> None:
     if settings.DEBUG_MODE:
         logger.info("Debug mode is enabled. Verbose logging will be used.")
 
-    logger.info("Max file size for downloads: %d MB", settings.MAX_FILE_SIZE // settings.BYTES_MB)
+    logger.info("Max file size for downloads: %d MB", settings.MAX_FILE_SIZE // BYTES_MB)
     logger.info("Allowed users: %s", ', '.join(settings.ALLOWED_USERS) if settings.ALLOWED_USERS else "None")
     logger.info("Use cookie: %s", "Yes" if settings.COOKIE_FILE else "No")
     

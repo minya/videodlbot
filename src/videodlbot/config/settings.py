@@ -1,11 +1,9 @@
 import os
 from typing import Optional, List
 from dotenv import load_dotenv
+from ..utils import BYTES_MB
 
 load_dotenv()
-
-BYTES_MB = 1048576
-
 
 class Settings:
     BOT_TOKEN: str = os.getenv('TELEGRAM_BOT_TOKEN', '')

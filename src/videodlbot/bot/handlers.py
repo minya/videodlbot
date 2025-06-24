@@ -10,6 +10,7 @@ from telegram import Message, Update
 from telegram.ext import ContextTypes
 
 from ..config import settings
+from ..utils import BYTES_MB
 from ..utils import is_valid_url, is_supported_platform
 from ..download import extract_video_info, download_video
 from ..storage import upload_to_firebase
@@ -95,7 +96,7 @@ async def _check_file_size(info: dict, status_message) -> bool:
     if 'filesize' in info and info['filesize'] and info['filesize'] > settings.MAX_FILE_SIZE:
         await try_edit_text(status_message,
             f"Sorry, the video is too large"
-            f"(size: {info['filesize'] // settings.BYTES_MB}MB, max: {settings.MAX_FILE_SIZE // settings.BYTES_MB}MB supported)."
+            f"(size: {info['filesize'] // BYTES_MB}MB, max: {settings.MAX_FILE_SIZE // BYTES_MB}MB supported)."
         )
         return False
     return True
@@ -166,14 +167,14 @@ async def _handle_large_file(output_path: str, info: dict, url: str, update, sta
     
     if download_url:
         caption = (f"Title: {info.get('title', 'Unknown')}\n"
-                  f"Size: {file_size // settings.BYTES_MB}MB (too large for Telegram)\n"
+                  f"Size: {file_size // BYTES_MB}MB (too large for Telegram)\n"
                   f"Download: {download_url}\n"
                   f"Source: {url}")
         await update.message.reply_text(caption)
     else:
         await status_message.edit_text(
             f"Sorry, failed to upload the video to cloud storage. "
-            f"The video is {file_size // settings.BYTES_MB}MB which exceeds Telegram's {settings.MAX_TELEGRAM_FILE_SIZE // settings.BYTES_MB}MB limit."
+            f"The video is {file_size // BYTES_MB}MB which exceeds Telegram's {settings.MAX_TELEGRAM_FILE_SIZE // BYTES_MB}MB limit."
         )
     return True
 

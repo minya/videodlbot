@@ -1,3 +1,3 @@
-from .settings import settings
+from .settings import settings, BYTES_MB
 
-__all__ = ['settings']
+__all__ = ['settings', 'BYTES_MB']
