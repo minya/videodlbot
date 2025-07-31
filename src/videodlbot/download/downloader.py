@@ -20,6 +20,7 @@ def extract_video_info(url: str) -> Dict[str, Any]:
         'no_warnings': True,
         'quiet': True,
         'verbose': settings.DEBUG_MODE,
+        'force_ipv6': True,
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -50,7 +51,7 @@ def need_convert_acodec(acodec: str) -> bool:
     return acodec not in ['aac', 'mp4a.40.2', 'mp4a.40.5', 'mp4a.40.29']
 
 
-def download_video(url: str, info: dict[str, any], output_path: str, progress_data: dict) -> Optional[str]:
+def download_video(url: str, info: dict[str, Any], output_path: str, progress_data: dict) -> Optional[str]:
     def on_progress(d):
         progress_data.clear()
         progress_data.update({'download_progress': d.copy()})
@@ -89,6 +90,7 @@ def download_video(url: str, info: dict[str, any], output_path: str, progress_da
                     'preferedformat': 'mp4',
                 },
             ],
+            'force_ipv6': True,
         }
 
         if need_convert:
