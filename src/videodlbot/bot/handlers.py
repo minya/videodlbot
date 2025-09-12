@@ -53,7 +53,11 @@ async def try_edit_text(message: Message, text: str) -> None:
 
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update is None or update.message is None:
+        return
     user = update.effective_user
+    if user is None:
+        return
     await update.message.reply_html(
         f"Hi {user.mention_html()}!\n\n"
         f"I can download videos from YouTube, Instagram, and Twitter/X.\n"
@@ -62,6 +66,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update is None or update.message is None:
+        return
     await update.message.reply_text(
         "How to use this bot:\n\n"
         "1. Send a video URL from YouTube, Instagram, or Twitter/X.\n"
@@ -106,15 +112,17 @@ def _create_download_thread(ctx: DownloadContext):
     def download_thread():
         try:
             result = download_video(ctx.url, ctx.info, ctx.temp_path, ctx.progress_data)
-            ctx.download_result[0] = result
+            ctx.download_result[0] = result # pyright: ignore
         except Exception as e:
             logger.error(f"Error in download thread: {e}")
-            ctx.download_error[0] = e
+            ctx.download_error[0] = e # pyright: ignore
         finally:
             logger.info("Download thread completed")
             ctx.download_complete.set()
     
-    ctx.thread = threading.Thread(target=download_thread)
+    ctx.thread = threading.Thread(target=download_thread) #pyright: ignore
+    if ctx.thread is None:
+        raise RuntimeError("Failed to create download thread")
     ctx.thread.daemon = True
     ctx.thread.start()
 
@@ -199,6 +207,9 @@ async def _send_video_to_telegram(output_path: str, info: dict, url: str, update
 
 
 async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update is None or update.message is None or not update.message.text:
+        return
+
     user = update.effective_user
     
     if not await _validate_user_access(user, update):
@@ -233,7 +244,7 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         except Exception as e:
             logger.error(f"Error while updating status: {e}")
         
-        if ctx.thread.is_alive():
+        if ctx.thread is not None and ctx.thread.is_alive():
             ctx.thread.join(timeout=5)
             
         if ctx.download_error[0]:

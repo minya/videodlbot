@@ -3,7 +3,8 @@ import yt_dlp
 
 
 def is_valid_url(url: str) -> bool:
-    return validators.url(url)
+    return validators.url(url) is True
+    
 
 
 def is_supported_platform(url: str) -> bool:

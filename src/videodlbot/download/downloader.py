@@ -26,6 +26,8 @@ def extract_video_info(url: str) -> Dict[str, Any]:
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         logger.info(f"Video information extracting: {url}")
         info = ydl.extract_info(url, download=False)
+        if not info:
+            return {}
         return info
 
 
