@@ -151,7 +151,7 @@ def _build_progress_message(ctx: DownloadContext) -> str:
         
         if not dl_progress_data and os.path.exists(ctx.temp_path):
             file_size = os.path.getsize(ctx.temp_path) / (1024 * 1024)
-            return f"Downloading... {file_size:.2f} MB downloaded"
+            return f"Downloading... {file_size or 0:.2f} MB downloaded"
         elif status == 'downloading':
             logger.debug(f"Progress data: {dl_progress_data}")
             return build_download_progress_message(dl_progress_data)
