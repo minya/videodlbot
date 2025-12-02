@@ -11,6 +11,10 @@ services:
       - DEBUG_MODE=${DEBUG_MODE:-}
     networks:
       - bot-network
+    logging:
+      options:
+        max-size: "5m"
+        max-file: "3"
 
 networks:
   bot-network:
