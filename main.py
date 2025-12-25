@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import urlparse
 from telegram import Update, BotCommand
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters
 
@@ -59,7 +60,30 @@ def main() -> None:
     logger.info("Allowed users: %s", ', '.join(settings.ALLOWED_USERS) if settings.ALLOWED_USERS else "None")
     logger.info("Use cookie: %s", "Yes" if settings.COOKIE_FILE else "No")
 
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    if not settings.WEBHOOK_URL:
+        logger.error("No webhook URL provided. Please set WEBHOOK_URL in .env file.")
+        return
+
+    webhook_url = settings.WEBHOOK_URL
+    if not webhook_url.startswith("https://"):
+        webhook_url = f"https://{webhook_url}"
+
+    parsed = urlparse(webhook_url)
+    url_path = parsed.path or "/"
+
+    logger.info("Webhook URL: %s", webhook_url)
+    logger.info("Webhook path: %s", url_path)
+    logger.info("Webhook port: %d", settings.WEBHOOK_PORT)
+
+    application.run_webhook(
+        listen="0.0.0.0",
+        port=settings.WEBHOOK_PORT,
+        url_path=url_path,
+        webhook_url=webhook_url,
+        secret_token=settings.WEBHOOK_SECRET if settings.WEBHOOK_SECRET else None,
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=True,
+    )
 
 
 if __name__ == '__main__':

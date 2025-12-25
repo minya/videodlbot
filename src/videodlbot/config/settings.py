@@ -20,5 +20,9 @@ class Settings:
     FIREBASE_CREDENTIALS_PATH: Optional[str] = os.getenv('FIREBASE_CREDENTIALS_PATH')
     FIREBASE_STORAGE_BUCKET: Optional[str] = os.getenv('FIREBASE_STORAGE_BUCKET')
 
+    WEBHOOK_URL: str = os.getenv('WEBHOOK_URL', '')
+    WEBHOOK_PORT: int = int(os.getenv('WEBHOOK_PORT', '80'))
+    WEBHOOK_SECRET: str = os.getenv('WEBHOOK_SECRET', '')
+
 
 settings = Settings()

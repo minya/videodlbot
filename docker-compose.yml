@@ -3,12 +3,33 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: videodlbot
+    container_name: videodlbot-bot
     restart: unless-stopped
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - MAX_FILE_SIZE=${MAX_FILE_SIZE:-}
       - DEBUG_MODE=${DEBUG_MODE:-}
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - WEBHOOK_PORT=80
+      - WEBHOOK_SECRET=${WEBHOOK_SECRET:-}
+    expose:
+      - "80"
+    networks:
+      - bot-network
+    logging:
+      options:
+        max-size: "5m"
+        max-file: "3"
+    depends_on:
+      - cloudflared
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: videodlbot-cloudflared
+    restart: unless-stopped
+    command: tunnel run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
     networks:
       - bot-network
     logging:
