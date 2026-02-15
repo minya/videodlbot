@@ -6,8 +6,8 @@ import time
 import threading
 import uuid
 import asyncio
-from datetime import datetime
-from telegram import Message, Update, InlineKeyboardButton, InlineKeyboardMarkup
+from functools import wraps
+from telegram import Message, Update, InlineKeyboardButton, InlineKeyboardMarkup, User
 from telegram.ext import ContextTypes
 
 from ..config import settings
@@ -18,6 +18,26 @@ from ..storage import upload_to_firebase, list_firebase_files, delete_firebase_f
 from .progress import build_download_progress_message, build_pp_progress_message
 
 logger = logging.getLogger(__name__)
+
+
+def authorized(func):
+    @wraps(func)
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+        if update is None:
+            return
+        user = update.effective_user
+        if user is None:
+            return
+        if str(user.id) not in settings.ALLOWED_USERS:
+            if update.callback_query:
+                await update.callback_query.answer("You are not authorized.", show_alert=True)
+            elif update.message:
+                await update.message.reply_text("You are not authorized to use this bot.")
+            logger.warning(f"Unauthorized access attempt by user: id={user.id} username={user.username} name={user.name} full_name={user.full_name}")
+            return
+        _log_user_action(user, f"{func.__name__}")
+        return await func(update, context)
+    return wrapper
 
 
 class DownloadContext:
@@ -46,19 +66,25 @@ class DownloadContext:
             logger.error(f"Error during cleanup: {cleanup_error}")
 
 
-async def try_edit_text(message: Message, text: str) -> None:
+async def _try_edit_text(message: Message, text: str) -> None:
     try:
         await message.edit_text(text)
     except Exception as e:
         logger.error(f"Error editing message: {e}")
 
+def _log_user_action(user: User, action: str) -> None:
+    logger.info(f"User action: {action} - id={user.id} username={user.username} name={user.name} full_name={user.full_name}")
 
+
+@authorized
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update is None or update.message is None:
+    del context # Unused parameter
+    if update.message is None:
         return
+
     user = update.effective_user
-    if user is None:
-        return
+    assert user is not None
+
     await update.message.reply_html(
         f"Hi {user.mention_html()}!\n\n"
         f"I can download videos from YouTube, Instagram, and Twitter/X.\n"
@@ -66,9 +92,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     )
 
 
+@authorized
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update is None or update.message is None:
+    del context # Unused parameter
+    if update.message is None:
         return
+
     await update.message.reply_text(
         "How to use this bot:\n\n"
         "1. Send a video URL from YouTube, Instagram, or Twitter/X.\n"
@@ -79,14 +108,6 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/listfiles - List all files in cloud storage (with delete buttons)\n\n"
         "Note: Videos larger than 50MB will be uploaded to cloud storage and a download link will be provided."
     )
-
-
-async def _validate_user_access(user, update) -> bool:
-    if str(user.id) not in settings.ALLOWED_USERS:
-        await update.message.reply_text("You are not authorized to use this bot.")
-        logger.warning(f"Unauthorized access attempt by user: {user.id} {user.username} {user.full_name}")
-        return False
-    return True
 
 
 async def _validate_url(url: str, update) -> bool:
@@ -105,7 +126,7 @@ async def _validate_url(url: str, update) -> bool:
 
 async def _check_file_size(info: dict, status_message) -> bool:
     if 'filesize' in info and info['filesize'] and info['filesize'] > settings.MAX_FILE_SIZE:
-        await try_edit_text(status_message,
+        await _try_edit_text(status_message,
             f"Sorry, the video is too large"
             f"(size: {info['filesize'] // BYTES_MB}MB, max: {settings.MAX_FILE_SIZE // BYTES_MB}MB supported)."
         )
@@ -143,7 +164,7 @@ async def _monitor_download_progress(ctx: DownloadContext, status_message):
             message = _build_progress_message(ctx)
 
             if prev_message != message and message:
-                await try_edit_text(status_message, message)
+                await _try_edit_text(status_message, message)
                 prev_message = message
             
         await asyncio.sleep(0.5)
@@ -194,7 +215,7 @@ async def _handle_large_file(output_path: str, info: dict, url: str, update, sta
 
 
 async def _send_video_to_telegram(output_path: str, info: dict, url: str, update, status_message):
-    await try_edit_text(status_message, "Upload in progress...")
+    await _try_edit_text(status_message, "Upload in progress...")
 
     caption = f"Title: {info.get('title', 'Unknown')}\nSource: {url}"
     width = info.get('width', None)
@@ -212,18 +233,16 @@ async def _send_video_to_telegram(output_path: str, info: dict, url: str, update
         )
 
 
+@authorized
 async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update is None or update.message is None or not update.message.text:
-        return
-
-    user = update.effective_user
-    
-    if not await _validate_user_access(user, update):
+    del context # Unused parameter
+    if update.message is None or not update.message.text:
         return
 
     url = update.message.text.strip()
     
     if not await _validate_url(url, update):
+        logger.warning(f"[Process URL] Invalid or unsupported URL received: {url}")
         return
 
     status_message = await update.message.reply_text("Downloading video, please wait...")
@@ -259,7 +278,7 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         output_path = ctx.download_result[0]
 
         if not output_path or not os.path.exists(output_path):
-            await try_edit_text(status_message, "Sorry, there was an error downloading the video.")
+            await _try_edit_text(status_message, "Sorry, there was an error downloading the video.")
             return
 
         logger.info(f"Video downloaded to: {output_path}")
@@ -275,18 +294,17 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     except Exception as e:
         logger.error(f"Error: {e}")
-        await try_edit_text(status_message, f"An error occurred: {str(e)}")
+        await _try_edit_text(status_message, f"An error occurred: {str(e)}")
         if ctx:
             ctx.cleanup()
 
 
+@authorized
 async def list_files(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /listfiles command to show all files in Firebase storage."""
-    if update is None or update.message is None:
-        return
+    del context # Unused parameter
 
-    user = update.effective_user
-    if not await _validate_user_access(user, update):
+    if update.message is None:
         return
 
     status_message = await update.message.reply_text("Loading files from storage...")
@@ -341,15 +359,12 @@ async def list_files(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
         await status_message.edit_text(f"An error occurred: {str(e)}")
 
 
+@authorized
 async def delete_file_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle delete button callback from inline keyboard."""
+    del context # Unused parameter
     query = update.callback_query
     if query is None or query.data is None:
-        return
-
-    user = update.effective_user
-    if str(user.id) not in settings.ALLOWED_USERS:
-        await query.answer("You are not authorized to delete files.", show_alert=True)
         return
 
     await query.answer()
