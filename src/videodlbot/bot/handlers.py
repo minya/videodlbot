@@ -332,9 +332,11 @@ async def list_files(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
             created_date = file['created'].strftime('%Y-%m-%d %H:%M')
             title = file['title']
 
+            url = file['url']
             message_parts.append(
                 f"\n{idx + 1}. {title}\n"
-                f"   Size: {size_mb:.2f} MB | Created: {created_date}"
+                f"   Size: {size_mb:.2f} MB | Created: {created_date}\n"
+                f"   {url}"
             )
 
             # Add delete button for each file (using index)
