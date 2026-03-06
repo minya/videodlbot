@@ -14,6 +14,7 @@ class Settings:
     
     DEBUG_MODE: bool = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
     ALLOWED_USERS: List[str] = os.getenv('ALLOWED_USERS', '').split(',')
+    ADMIN_USERS: List[str] = os.getenv('ADMIN_USERS', '').split(',')
     
     COOKIE_FILE: Optional[str] = '.secrets/cookies.txt' if os.path.exists('.secrets/cookies.txt') else None
     

@@ -134,7 +134,8 @@ async def _handle_large_file(output_path: str, info: dict, url: str, update, sta
 
     title = info.get('title', 'video')
     unique_filename = f"{uuid.uuid4()}_{title.replace(' ', '_')}.mp4"
-    download_url = upload_to_firebase(output_path, unique_filename, title=title)
+    user_id = str(update.effective_user.id) if update.effective_user else None
+    download_url = upload_to_firebase(output_path, unique_filename, title=title, user_id=user_id)
 
     if download_url:
         caption = (f"Title: {title}\n"

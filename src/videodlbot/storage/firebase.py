@@ -24,7 +24,7 @@ def initialize_firebase() -> None:
         logger.warning("Firebase credentials or bucket not configured")
 
 
-def upload_to_firebase(file_path: str, filename: str, title: Optional[str] = None) -> Optional[str]:
+def upload_to_firebase(file_path: str, filename: str, title: Optional[str] = None, user_id: Optional[str] = None) -> Optional[str]:
     if not firebase_app:
         logger.error("Firebase not initialized")
         return None
@@ -35,9 +35,13 @@ def upload_to_firebase(file_path: str, filename: str, title: Optional[str] = Non
 
         logger.info(f"Uploading {file_path} to Firebase Storage as {filename}")
 
-        # Set custom metadata with human-readable title
+        metadata = {}
         if title:
-            blob.metadata = {'title': title}
+            metadata['title'] = title
+        if user_id:
+            metadata['user_id'] = user_id
+        if metadata:
+            blob.metadata = metadata
 
         blob.upload_from_filename(file_path)
 
@@ -52,8 +56,12 @@ def upload_to_firebase(file_path: str, filename: str, title: Optional[str] = Non
         return None
 
 
-def list_firebase_files() -> Optional[list]:
-    """List all files in the Firebase Storage videos folder."""
+def list_firebase_files(user_id: Optional[str] = None, is_admin: bool = False) -> Optional[list]:
+    """List files in the Firebase Storage videos folder.
+
+    If user_id is provided and is_admin is False, only files belonging to that user are returned.
+    If is_admin is True, all files are returned.
+    """
     if not firebase_app:
         logger.error("Firebase not initialized")
         return None
@@ -76,10 +84,16 @@ def list_firebase_files() -> Optional[list]:
             # Reload blob to get metadata
             blob.reload()
 
-            # Get human-readable title from metadata, fallback to filename
+            # Get metadata fields
             title = None
+            file_user_id = None
             if blob.metadata:
                 title = blob.metadata.get('title')
+                file_user_id = blob.metadata.get('user_id')
+
+            # Filter by user_id unless admin
+            if user_id and not is_admin and file_user_id != user_id:
+                continue
 
             files.append({
                 'name': blob.name,
@@ -87,7 +101,8 @@ def list_firebase_files() -> Optional[list]:
                 'size': blob.size,
                 'created': blob.time_created,
                 'updated': blob.updated,
-                'url': blob.public_url
+                'url': blob.public_url,
+                'user_id': file_user_id,
             })
 
         logger.info(f"Found {len(files)} files in Firebase Storage")
