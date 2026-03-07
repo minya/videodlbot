@@ -3,7 +3,7 @@ import yt_dlp
 
 
 def is_valid_url(url: str) -> bool:
-    return validators.url(url) is True
+    return validators.url(url) is True  # pyright: ignore[reportAttributeAccessIssue]
     
 
 

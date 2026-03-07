@@ -22,6 +22,7 @@ var/
 
 # Virtual Environment
 venv/
+.venv
 ENV/
 env/
 
@@ -51,4 +52,3 @@ Thumbs.db
 # Secrets
 .secrets/
 
-pyrightconfig.json

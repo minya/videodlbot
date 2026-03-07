@@ -1,10 +1,12 @@
 import os
-from typing import Optional, List
+from typing import final
+
 from dotenv import load_dotenv
 from ..utils import BYTES_MB
 
 load_dotenv()
 
+@final
 class Settings:
     BOT_TOKEN: str = os.getenv('TELEGRAM_BOT_TOKEN', '')
     
@@ -13,13 +15,13 @@ class Settings:
     MAX_TELEGRAM_FILE_SIZE: int = 50 * BYTES_MB
     
     DEBUG_MODE: bool = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
-    ALLOWED_USERS: List[str] = os.getenv('ALLOWED_USERS', '').split(',')
-    ADMIN_USERS: List[str] = os.getenv('ADMIN_USERS', '').split(',')
+    ALLOWED_USERS: list[str] = os.getenv('ALLOWED_USERS', '').split(',')
+    ADMIN_USERS: list[str] = os.getenv('ADMIN_USERS', '').split(',')
     
-    COOKIE_FILE: Optional[str] = '.secrets/cookies.txt' if os.path.exists('.secrets/cookies.txt') else None
+    COOKIE_FILE: str | None = '.secrets/cookies.txt' if os.path.exists('.secrets/cookies.txt') else None
     
-    FIREBASE_CREDENTIALS_PATH: Optional[str] = os.getenv('FIREBASE_CREDENTIALS_PATH')
-    FIREBASE_STORAGE_BUCKET: Optional[str] = os.getenv('FIREBASE_STORAGE_BUCKET')
+    FIREBASE_CREDENTIALS_PATH: str | None = os.getenv('FIREBASE_CREDENTIALS_PATH')
+    FIREBASE_STORAGE_BUCKET: str | None = os.getenv('FIREBASE_STORAGE_BUCKET')
 
     WEBHOOK_URL: str = os.getenv('WEBHOOK_URL', '')
     WEBHOOK_PORT: int = int(os.getenv('WEBHOOK_PORT', '80'))

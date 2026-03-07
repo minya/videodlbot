@@ -1,5 +1,7 @@
 import logging
-from typing import Optional
+from datetime import datetime
+from typing import Any, TypedDict
+
 import firebase_admin
 from firebase_admin import credentials, storage
 
@@ -7,7 +9,18 @@ from ..config import settings
 
 logger = logging.getLogger(__name__)
 
-firebase_app = None
+firebase_app: firebase_admin.App | None = None
+
+
+class FileInfo(TypedDict):
+    name: str
+    title: str
+    size: int
+    created: datetime | None
+    updated: datetime | None
+    url: str
+    user_id: str | None
+
 
 def initialize_firebase() -> None:
     global firebase_app
@@ -24,7 +37,7 @@ def initialize_firebase() -> None:
         logger.warning("Firebase credentials or bucket not configured")
 
 
-def upload_to_firebase(file_path: str, filename: str, title: Optional[str] = None, user_id: Optional[str] = None) -> Optional[str]:
+def upload_to_firebase(file_path: str, filename: str, title: str | None = None, user_id: str | None = None) -> str | None:
     if not firebase_app:
         logger.error("Firebase not initialized")
         return None
@@ -35,7 +48,7 @@ def upload_to_firebase(file_path: str, filename: str, title: Optional[str] = Non
 
         logger.info(f"Uploading {file_path} to Firebase Storage as {filename}")
 
-        metadata = {}
+        metadata: dict[str, str] = {}
         if title:
             metadata['title'] = title
         if user_id:
@@ -47,7 +60,7 @@ def upload_to_firebase(file_path: str, filename: str, title: Optional[str] = Non
 
         blob.make_public()
 
-        download_url = blob.public_url
+        download_url: str = blob.public_url
         logger.info(f"File uploaded successfully. Download URL: {download_url}")
         return download_url
 
@@ -56,7 +69,7 @@ def upload_to_firebase(file_path: str, filename: str, title: Optional[str] = Non
         return None
 
 
-def list_firebase_files(user_id: Optional[str] = None, is_admin: bool = False) -> Optional[list]:
+def list_firebase_files(user_id: str | None = None, is_admin: bool = False) -> list[FileInfo] | None:
     """List files in the Firebase Storage videos folder.
 
     If user_id is provided and is_admin is False, only files belonging to that user are returned.
@@ -68,16 +81,17 @@ def list_firebase_files(user_id: Optional[str] = None, is_admin: bool = False) -
 
     try:
         bucket = storage.bucket()
-        blobs = bucket.list_blobs(prefix="videos/")
+        blobs: Any = bucket.list_blobs(prefix="videos/")
 
-        files = []
+        files: list[FileInfo] = []
         for blob in blobs:
             # Skip directory markers and files with no actual content
-            if blob.name.endswith('/') or blob.size == 0:
+            name: str = blob.name
+            if name.endswith('/') or blob.size == 0:
                 continue
 
             # Only include actual video files
-            filename = blob.name.replace('videos/', '')
+            filename: str = name.replace('videos/', '')
             if not filename:
                 continue
 
@@ -85,23 +99,24 @@ def list_firebase_files(user_id: Optional[str] = None, is_admin: bool = False) -
             blob.reload()
 
             # Get metadata fields
-            title = None
-            file_user_id = None
-            if blob.metadata:
-                title = blob.metadata.get('title')
-                file_user_id = blob.metadata.get('user_id')
+            title: str | None = None
+            file_user_id: str | None = None
+            blob_metadata: dict[str, str] | None = blob.metadata
+            if blob_metadata:
+                title = blob_metadata.get('title')
+                file_user_id = blob_metadata.get('user_id')
 
             # Filter by user_id unless admin
             if user_id and not is_admin and file_user_id != user_id:
                 continue
 
             files.append({
-                'name': blob.name,
+                'name': name,
                 'title': title or filename,
-                'size': blob.size,
+                'size': int(blob.size),
                 'created': blob.time_created,
                 'updated': blob.updated,
-                'url': blob.public_url,
+                'url': str(blob.public_url),
                 'user_id': file_user_id,
             })
 

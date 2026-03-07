@@ -10,7 +10,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     if update.message is None:
         return
 
-    await update.message.reply_text(
+    _ = await update.message.reply_text(
         "How to use this bot:\n\n"
         "1. Send a video URL from YouTube, Instagram, or Twitter/X.\n"
         "2. Wait for the bot to download and send the video.\n\n"

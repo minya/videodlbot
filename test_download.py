@@ -2,7 +2,6 @@ import sys
 import os
 import argparse
 import logging
-from urllib.parse import urlparse
 import yt_dlp
 
 from src.videodlbot.utils import is_valid_url as is_url
@@ -15,7 +14,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
-def test_extraction(url, verbose=False):
+def test_extraction(url: str, verbose: bool = False) -> bool:
     """Test yt-dlp's ability to extract information from a URL."""
     logger.info(f"Testing info extraction for URL: {url}")
     
@@ -73,7 +72,7 @@ def test_extraction(url, verbose=False):
         logger.error(f"Error extracting information: {e}")
         return False
 
-def test_download(url, verbose=False, format_id=None):
+def test_download(url: str, verbose: bool = False, format_id: str | None = None) -> bool:
     """Test yt-dlp's ability to download from a URL."""
     logger.info(f"Testing download for URL: {url}")
     
@@ -128,7 +127,7 @@ def test_download(url, verbose=False, format_id=None):
         logger.error(f"Error downloading: {e}")
         return False
 
-def main():
+def main() -> int:
     parser = argparse.ArgumentParser(description='Test yt-dlp functionality')
     parser.add_argument('url', help='URL to test')
     parser.add_argument('-v', '--verbose', action='store_true', help='Enable verbose output')
@@ -143,7 +142,7 @@ def main():
         return 1
     
     # Print yt-dlp version
-    logger.info(f"yt-dlp version: {yt_dlp.version.__version__}")
+    logger.info(f"yt-dlp version: {yt_dlp.version.__version__}")  # pyright: ignore[reportAttributeAccessIssue]
     
     # Test extraction
     extraction_success = test_extraction(args.url, args.verbose)

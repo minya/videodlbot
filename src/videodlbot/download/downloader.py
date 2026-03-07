@@ -1,6 +1,6 @@
 import os
 import logging
-from typing import Optional, Dict, Any
+from typing import Any
 import yt_dlp
 
 from ..config import settings
@@ -10,7 +10,7 @@ logger = logging.getLogger(__name__)
 FORMAT_SELECTION = 'best[ext=mp4]/bestvideo[ext=mp4]+bestaudio/best/bestvideo+bestaudio'
 
 
-def extract_video_info(url: str) -> Dict[str, Any]:
+def extract_video_info(url: str) -> dict[str, Any]:
     ydl_opts = {
         'age_limit': 21,
         'cookiefile': settings.COOKIE_FILE,
@@ -25,7 +25,7 @@ def extract_video_info(url: str) -> Dict[str, Any]:
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         logger.info(f"Video information extracting: {url}")
-        info = ydl.extract_info(url, download=False)
+        info: dict[str, Any] | None = ydl.extract_info(url, download=False)
         if not info:
             return {}
         return info
@@ -53,12 +53,12 @@ def need_convert_acodec(acodec: str) -> bool:
     return acodec not in ['aac', 'mp4a.40.2', 'mp4a.40.5', 'mp4a.40.29']
 
 
-def download_video(url: str, info: dict[str, Any], output_path: str, progress_data: dict) -> Optional[str]:
-    def on_progress(d):
+def download_video(url: str, info: dict[str, Any], output_path: str, progress_data: dict[str, Any]) -> str | None:
+    def on_progress(d: dict[str, Any]) -> None:
         progress_data.clear()
         progress_data.update({'download_progress': d.copy()})
 
-    def on_postprocess(d):
+    def on_postprocess(d: dict[str, Any]) -> None:
         progress_data.clear()
         progress_data.update({'postprocess_progress': d.copy()})
 
@@ -74,7 +74,19 @@ def download_video(url: str, info: dict[str, Any], output_path: str, progress_da
     verbose = settings.DEBUG_MODE
     
     try:
-        ydl_opts = {
+        postprocessors: list[dict[str, str]] = [
+            {
+                'key': 'FFmpegVideoConvertor',
+                'preferedformat': 'mp4',
+            },
+        ]
+
+        if need_convert:
+            postprocessors.append({
+                'key': 'FFmpegCopyStream',
+            })
+
+        ydl_opts: dict[str, Any] = {
             'quiet': not verbose,
             'no_warnings': not verbose,
             'verbose': verbose,
@@ -86,19 +98,11 @@ def download_video(url: str, info: dict[str, Any], output_path: str, progress_da
             'merge_output_format': 'mp4',
             'progress_hooks': [on_progress],
             'postprocessor_hooks': [on_postprocess],
-            'postprocessors': [
-                {
-                    'key': 'FFmpegVideoConvertor',
-                    'preferedformat': 'mp4',
-                },
-            ],
+            'postprocessors': postprocessors,
             'force_ipv6': True,
         }
 
         if need_convert:
-            ydl_opts['postprocessors'].append({
-                'key': 'FFmpegCopyStream',
-            })
             v_a = 'libx264' if need_convert_vcodec(vcodec) else 'copy'
             c_a = 'aac' if need_convert_acodec(acodec) else 'copy'
             ydl_opts['postprocessor_args'] = {
