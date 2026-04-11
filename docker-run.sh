@@ -86,15 +86,9 @@ build_image() {
 # Function to start container
 start_container() {
     check_env_file
-    
-    # Check if image exists, if not build it
-    if [ -z "$(docker images -q videodlbot_videodlbot 2>/dev/null)" ]; then
-        echo -e "${YELLOW}Docker image not found. Building first...${NC}"
-        build_image
-    fi
-    
-    echo -e "${YELLOW}Starting container...${NC}"
-    docker-compose up -d
+
+    echo -e "${YELLOW}Building and starting container...${NC}"
+    docker-compose up -d --build
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}Container started successfully!${NC}"
@@ -120,8 +114,8 @@ stop_container() {
 
 # Function to restart container
 restart_container() {
-    echo -e "${YELLOW}Restarting container...${NC}"
-    docker-compose restart
+    echo -e "${YELLOW}Rebuilding and restarting container...${NC}"
+    docker-compose up -d --build
     
     if [ $? -eq 0 ]; then
         echo -e "${GREEN}Container restarted successfully!${NC}"
