@@ -52,3 +52,4 @@ Thumbs.db
 # Secrets
 .secrets/
 
+.claude/settings.local.json
