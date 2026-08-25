@@ -58,7 +58,13 @@ def main() -> None:
 
     logger.info("Max file size for downloads: %d MB", settings.MAX_FILE_SIZE // BYTES_MB)
     logger.info("Allowed users: %s", ', '.join(settings.ALLOWED_USERS) if settings.ALLOWED_USERS else "None")
-    logger.info("Use cookie: %s", "Yes" if settings.COOKIE_FILE else "No")
+    if settings.COOKIE_FILE:
+        logger.info("Use cookie: Yes (%s)", settings.COOKIE_FILE)
+    else:
+        logger.warning(
+            "No cookie file found at %s. Downloads requiring authentication (e.g. Instagram) will fail.",
+            settings.COOKIE_FILE_PATH,
+        )
 
     if not settings.WEBHOOK_URL:
         logger.error("No webhook URL provided. Please set WEBHOOK_URL in .env file.")

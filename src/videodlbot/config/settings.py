@@ -18,7 +18,8 @@ class Settings:
     ALLOWED_USERS: list[str] = os.getenv('ALLOWED_USERS', '').split(',')
     ADMIN_USERS: list[str] = os.getenv('ADMIN_USERS', '').split(',')
     
-    COOKIE_FILE: str | None = '.secrets/cookies.txt' if os.path.exists('.secrets/cookies.txt') else None
+    COOKIE_FILE_PATH: str = '.secrets/cookies.txt'
+    COOKIE_FILE: str | None = COOKIE_FILE_PATH if os.path.exists(COOKIE_FILE_PATH) else None
     
     FIREBASE_CREDENTIALS_PATH: str | None = os.getenv('FIREBASE_CREDENTIALS_PATH')
     FIREBASE_STORAGE_BUCKET: str | None = os.getenv('FIREBASE_STORAGE_BUCKET')

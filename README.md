@@ -165,18 +165,15 @@ If you prefer to use Docker without docker-compose:
      -e MAX_FILE_SIZE=1073741824 \
      -e DEBUG_MODE=false \
      -v $(pwd)/downloads:/app/downloads \
-     -v $(pwd)/cookies.txt:/app/cookies.txt:ro \
+     -v $(pwd)/.secrets:/app/.secrets:ro \
      videodlbot
    ```
 
-#### Docker Volume and Cookies
+#### Cookies
 
-The Docker setup uses a volume for downloads to persist downloaded files between container restarts. If you need to use cookies for authentication with certain sites:
+To download from sites that require login (e.g. Instagram), export cookies from your browser in Netscape format and save them as `.secrets/cookies.txt`. The bot detects this file automatically at startup; no environment variable is needed. If the file is missing, a warning is logged at startup and authenticated downloads will fail.
 
-1. Create a `cookies.txt` file in the project directory.
-2. Set `USE_COOKIES=true` in your `.env` file.
-
-The cookies file will be mounted as read-only inside the container.
+Note for Docker: the `.secrets/` directory is copied into the image at build time, so after updating `.secrets/cookies.txt` you must rebuild the container (`./docker-run.sh restart` does this). Tip: export cookies from a private browser window and close it without logging out, otherwise the site may rotate the session and invalidate the exported cookies within days.
 
 ## Troubleshooting
 
