@@ -1,6 +1,6 @@
 python-telegram-bot[webhooks]>=20.0
 python-dotenv>=1.0.0
-yt-dlp>=2026.03.17
+yt-dlp>=2026.08.19
 requests>=2.31.0
 validators>=0.20.0
 pillow>=9.0.0
