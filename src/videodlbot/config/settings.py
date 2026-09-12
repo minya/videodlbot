@@ -13,6 +13,7 @@ class Settings:
     _MAX_FILE_SIZE_STR = os.getenv('MAX_FILE_SIZE', '')
     MAX_FILE_SIZE: int = int(_MAX_FILE_SIZE_STR) * BYTES_MB if _MAX_FILE_SIZE_STR else 500 * BYTES_MB
     MAX_TELEGRAM_FILE_SIZE: int = 50 * BYTES_MB
+    MAX_TELEGRAM_PHOTO_SIZE: int = 10 * BYTES_MB
     
     DEBUG_MODE: bool = os.getenv('DEBUG_MODE', 'false').lower() == 'true'
     ALLOWED_USERS: list[str] = os.getenv('ALLOWED_USERS', '').split(',')

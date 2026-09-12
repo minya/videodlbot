@@ -15,6 +15,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     _ = await update.message.reply_html(
         f"Hi {user.mention_html()}!\n\n"
-        f"I can download videos from YouTube, Instagram, and Twitter/X.\n"
-        f"Just send me a valid video URL, and I'll download it for you."
+        f"I can download videos from YouTube, Instagram, and Twitter/X, "
+        f"and photos or carousels from Instagram.\n"
+        f"Just send me a valid URL, and I'll download it for you."
     )

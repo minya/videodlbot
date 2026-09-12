@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Python-based Telegram bot that downloads videos from YouTube, Instagram, Twitter/X, and other platforms supported by yt-dlp. The bot features user access control, Firebase cloud storage integration for large files, and real-time download progress updates.
+This is a Python-based Telegram bot that downloads videos from YouTube, Instagram, Twitter/X, and other platforms supported by yt-dlp, plus photos and carousel posts from Instagram. The bot features user access control, Firebase cloud storage integration for large files, and real-time download progress updates.
 
 ## Common Commands
 
@@ -77,6 +77,13 @@ pip install -r requirements.txt
 - Uses FFmpeg for format conversion and merging when needed
 - Format selection: `best[ext=mp4]/bestvideo[ext=mp4]+bestaudio/best/bestvideo+bestaudio`
 - Forces IPv6 connections (`force_ipv6: True`)
+
+**Instagram Photos and Carousels (`src/videodlbot/download/instagram.py`)**
+- `fetch_instagram_post()`: Queries the Instagram media info API (requires a `sessionid` cookie in `.secrets/cookies.txt`) and returns an `InstagramPost` with image/video items
+- `download_instagram_media()`: Downloads each item over HTTP using yt-dlp's networking (cookies, IPv6) into the temp dir
+- Handler routes Instagram post URLs here when the post is an image or a carousel; single-video posts and reels fall through to the yt-dlp pipeline
+- Items are sent as photos/videos via `reply_media_group` in chunks of 10; items over Telegram limits (10 MB photos, 50 MB videos) are skipped and reported
+- Without a session cookie the URL falls through to yt-dlp, which cannot download image posts
 
 **Storage (`src/videodlbot/storage/firebase.py`)**
 - Optional Firebase Storage integration for large files

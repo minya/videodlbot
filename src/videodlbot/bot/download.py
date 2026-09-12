@@ -6,19 +6,24 @@ import time
 import threading
 import uuid
 import asyncio
+from contextlib import ExitStack
 from typing import Any, final
-from telegram import Message, Update
+from telegram import InputMediaPhoto, InputMediaVideo, Message, Update
 from telegram.ext import ContextTypes
 
 from ..config import settings
 from ..utils import BYTES_MB
 from ..utils import is_valid_url, is_supported_platform
 from ..download import extract_video_info, download_video
+from ..download import DownloadedMedia, InstagramPost, download_instagram_media, fetch_instagram_post, is_instagram_post_url
 from ..storage import upload_to_firebase
 from .common import authorized, try_edit_text
 from .progress import build_download_progress_message, build_pp_progress_message
 
 logger = logging.getLogger(__name__)
+
+MEDIA_GROUP_MAX_ITEMS = 10
+CAPTION_MAX_LENGTH = 1024
 
 
 @final
@@ -59,7 +64,8 @@ async def _validate_url(url: str, update: Update) -> bool:
     if not is_supported_platform(url):
         _ = await update.message.reply_text(
             "Sorry, this URL is not from a supported platform.\n"
-            "I can download videos from YouTube, Instagram, and Twitter/X."
+            "I can download videos from YouTube, Instagram, and Twitter/X, "
+            "and photos or carousels from Instagram."
         )
         return False
     return True
@@ -176,6 +182,129 @@ async def _send_video_to_telegram(output_path: str, info: dict[str, Any], url: s
         )
 
 
+def _build_post_caption(post: InstagramPost, url: str) -> str:
+    source = f"Source: {url}"
+    if not post.caption:
+        return source
+    caption = post.caption.strip()
+    limit = CAPTION_MAX_LENGTH - len(source) - 2
+    if len(caption) > limit:
+        caption = caption[:limit - 3].rstrip() + '...'
+    return f"{caption}\n\n{source}"
+
+
+def _build_input_media(
+    item: DownloadedMedia,
+    stack: ExitStack,
+    caption: str | None,
+) -> InputMediaPhoto | InputMediaVideo | None:
+    if item.media.kind == 'video':
+        if item.size > settings.MAX_TELEGRAM_FILE_SIZE:
+            return None
+        return InputMediaVideo(
+            media=stack.enter_context(open(item.path, 'rb')),
+            caption=caption,
+            width=item.media.width,
+            height=item.media.height,
+            supports_streaming=True,
+        )
+    if item.size > settings.MAX_TELEGRAM_PHOTO_SIZE:
+        return None
+    return InputMediaPhoto(media=stack.enter_context(open(item.path, 'rb')), caption=caption)
+
+
+async def _send_instagram_media(
+    downloaded: list[DownloadedMedia],
+    post: InstagramPost,
+    url: str,
+    update: Update,
+    status_message: Message,
+) -> int:
+    """Send downloaded items as photos/videos in groups of up to 10. Returns the number of skipped items."""
+    if not update.message:
+        return 0
+    await try_edit_text(status_message, "Upload in progress...")
+
+    caption: str | None = _build_post_caption(post, url)
+    skipped = 0
+    sendable = [item for item in downloaded if item.size <= settings.MAX_TELEGRAM_FILE_SIZE]
+
+    for start in range(0, len(sendable), MEDIA_GROUP_MAX_ITEMS):
+        chunk = sendable[start:start + MEDIA_GROUP_MAX_ITEMS]
+        with ExitStack() as stack:
+            media_group: list[InputMediaPhoto | InputMediaVideo] = []
+            for item in chunk:
+                input_media = _build_input_media(item, stack, caption if not media_group else None)
+                if input_media is None:
+                    skipped += 1
+                    continue
+                media_group.append(input_media)
+            if not media_group:
+                continue
+            caption = None
+
+            if len(media_group) == 1:
+                single = media_group[0]
+                if isinstance(single, InputMediaVideo):
+                    _ = await update.message.reply_video(
+                        video=single.media, caption=single.caption, width=single.width, height=single.height,
+                        supports_streaming=True, read_timeout=120, write_timeout=120,
+                    )
+                else:
+                    _ = await update.message.reply_photo(
+                        photo=single.media, caption=single.caption, read_timeout=120, write_timeout=120,
+                    )
+            else:
+                _ = await update.message.reply_media_group(
+                    media=media_group, read_timeout=120, write_timeout=120,
+                )
+
+    return skipped + (len(downloaded) - len(sendable))
+
+
+async def _process_instagram_post(post: InstagramPost, url: str, update: Update, status_message: Message) -> None:
+    if not post.items:
+        await try_edit_text(status_message, "Sorry, this Instagram post contains no downloadable media.")
+        return
+
+    total = len(post.items)
+    temp_dir = tempfile.mkdtemp()
+    logger.info(f"Temporary directory created: {temp_dir}. Downloading {total} Instagram items")
+    progress = {'done': 0}
+
+    def on_item_done(done: int, _total: int) -> None:
+        progress['done'] = done
+
+    try:
+        task = asyncio.create_task(asyncio.to_thread(download_instagram_media, post, temp_dir, on_item_done))
+        prev_message = ''
+        while not task.done():
+            message = f"Downloading Instagram post... {progress['done']}/{total} items"
+            if message != prev_message:
+                await try_edit_text(status_message, message)
+                prev_message = message
+            await asyncio.sleep(1.5)
+        downloaded = task.result()
+
+        if not downloaded:
+            await try_edit_text(status_message, "Sorry, there was an error downloading the Instagram post.")
+            return
+
+        skipped = await _send_instagram_media(downloaded, post, url, update, status_message)
+        failed = total - len(downloaded)
+        if failed or skipped:
+            notes: list[str] = []
+            if failed:
+                notes.append(f"{failed} item(s) failed to download")
+            if skipped:
+                notes.append(f"{skipped} item(s) were too large for Telegram")
+            await try_edit_text(status_message, "Sent with issues: " + ", ".join(notes) + ".")
+        else:
+            _ = await status_message.delete()
+    finally:
+        shutil.rmtree(temp_dir, ignore_errors=True)
+
+
 @authorized
 async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     del context # Unused parameter
@@ -188,10 +317,16 @@ async def process_url(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         logger.warning(f"[Process URL] Invalid or unsupported URL received: {url}")
         return
 
-    status_message = await update.message.reply_text("Downloading video, please wait...")
+    status_message = await update.message.reply_text("Downloading, please wait...")
     ctx = None
 
     try:
+        if is_instagram_post_url(url):
+            post = await asyncio.to_thread(fetch_instagram_post, url)
+            if post and (post.is_carousel or post.has_images):
+                await _process_instagram_post(post, url, update, status_message)
+                return
+
         info = extract_video_info(url)
 
         if not await _check_file_size(info, status_message):

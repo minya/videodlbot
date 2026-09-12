@@ -5,6 +5,7 @@ A Telegram bot that can download videos from YouTube, Instagram, and Twitter/X u
 ## Features
 
 - Downloads videos from YouTube, Instagram, and Twitter/X
+- Downloads Instagram photos and carousel posts (mixed photos and videos), sent as Telegram albums; requires cookies
 - Automatically handles different video formats
 - Respects Telegram's file size limitations
 - User access control with allowlist
